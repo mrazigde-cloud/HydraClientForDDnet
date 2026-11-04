@@ -111,8 +111,8 @@ CSnapshotDelta *CClient::SnapshotDelta()
 
 CClient::CClient() :
 	m_DemoPlayer(&m_SnapshotDelta, &m_SnapshotDeltaSixup, true, [&]() { UpdateDemoIntraTimers(); }),
-	m_aInputtimeMarginGraphs{{128, 2, true}, {128, 2, true}, {128, 2, true}, {128, 2, true}},
-	m_aGametimeMarginGraphs{{128, 2, true}, {128, 2, true}, {128, 2, true}, {128, 2, true}},
+	m_aInputtimeMarginGraphs{{128, 2, true}, {128, 2, true}, {128, 2, true}, {128, 2, true}, {128, 2, true}},
+	m_aGametimeMarginGraphs{{128, 2, true}, {128, 2, true}, {128, 2, true}, {128, 2, true}, {128, 2, true}},
 	m_FpsGraph(4096, 0, true)
 {
 	m_StateStartTime = time_get();
@@ -125,7 +125,8 @@ CClient::CClient() :
 	mem_zero(m_aapSnapshots, sizeof(m_aapSnapshots));
 	for(auto &SnapshotStorage : m_aSnapshotStorage)
 		SnapshotStorage.Init();
-	m_ExtraSnapshotStorage.Init();
+	for(auto &SnapshotStorage : m_aExtraSnapshotStorage)
+		SnapshotStorage.Init();
 	mem_zero(m_aDemorecSnapshotHolders, sizeof(m_aDemorecSnapshotHolders));
 	m_CurrentServerInfo = {};
 	mem_zero(&m_Checksum, sizeof(m_Checksum));
@@ -235,12 +236,16 @@ int CClient::SendMsg(int Conn, CMsgPacker *pMsg, int Flags)
 
 int CClient::SendMsgActive(CMsgPacker *pMsg, int Flags)
 {
-	return SendMsg(IsExtraActive() ? CONN_EXTRA : g_Config.m_ClDummy, pMsg, Flags);
+	return SendMsg(IClient::IsExtraConn(m_ActiveConn) ? m_ActiveConn : g_Config.m_ClDummy, pMsg, Flags);
 }
-void CClient::SendExtraInfo()
+void CClient::SendExtraInfo(int Conn)
 {
 	static char s_aExtraName[MAX_NAME_LENGTH];
-	str_format(s_aExtraName, sizeof(s_aExtraName), "[E] %s", PlayerName());
+	const int Idx = IClient::ExtraConnToIndex(Conn);
+	if(Idx == 0)
+		str_format(s_aExtraName, sizeof(s_aExtraName), "[E] %s", PlayerName());
+	else
+		str_format(s_aExtraName, sizeof(s_aExtraName), "[E%d] %s", Idx + 1, PlayerName());
 
 	CNetMsg_Cl_StartInfo Msg;
 	Msg.m_pName = s_aExtraName;
@@ -250,11 +255,11 @@ void CClient::SendExtraInfo()
 	Msg.m_UseCustomColor = g_Config.m_ClPlayerUseCustomColor;
 	Msg.m_ColorBody = g_Config.m_ClPlayerColorBody;
 	Msg.m_ColorFeet = g_Config.m_ClPlayerColorFeet;
-	SendPackMsg(CONN_EXTRA, &Msg, MSGFLAG_VITAL);
+	SendPackMsg(Conn, &Msg, MSGFLAG_VITAL);
 }
 void CClient::SendInfo(int Conn)
 {
-	CUuid ConnId = (Conn == CONN_EXTRA) ? m_ExtraConnectionId : m_ConnectionId;
+	CUuid ConnId = IClient::IsExtraConn(Conn) ? m_aExtraConnectionId[IClient::ExtraConnToIndex(Conn)] : m_ConnectionId;
 
 	CMsgPacker MsgVer(NETMSG_CLIENTVER, true);
 	MsgVer.AddRaw(&ConnId, sizeof(ConnId));
@@ -367,7 +372,7 @@ bool CClient::ConnectionProblems() const
 void CClient::SendInput()
 {
 	// Если Extra не онлайн, но режим залип на EXTRA — вернуть MAIN и антипинг
-	if(m_ActiveConn == CONN_EXTRA && m_aNetClient[CONN_EXTRA].State() != NETSTATE_ONLINE)
+	if(IClient::IsExtraConn(m_ActiveConn) && m_aNetClient[m_ActiveConn].State() != NETSTATE_ONLINE)
 	{
 		m_ActiveConn = CONN_MAIN;
 		m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "client", "== Control: MAIN (auto-restore) ==");
@@ -377,7 +382,15 @@ void CClient::SendInput()
 	if(m_aPredTick[g_Config.m_ClDummy] <= 0)
 		return;
 
-	const bool ExtraActive = (m_ActiveConn == CONN_EXTRA && m_aNetClient[CONN_EXTRA].State() == NETSTATE_ONLINE);
+	const bool ExtraActive = IClient::IsExtraConn(m_ActiveConn) && m_aNetClient[m_ActiveConn].State() == NETSTATE_ONLINE;
+	const bool CopyAll = g_Config.m_ClTestClientCopyMovesAll != 0;
+
+	// Кэшируем input один раз — берём напрямую из m_Controls (а не SnapInput,
+	// который может вернуть 0 "нет изменений" → extras получат нули и будут "спамить")
+	int aCopyAllBuf[sizeof(CNetObj_PlayerInput) / sizeof(int)];
+	int CopyAllSize = 0;
+	if(CopyAll)
+		CopyAllSize = GameClient()->GetCurrentInput(aCopyAllBuf);
 
 	bool Force = false;
 	for(int Dummy = 0; Dummy < NUM_DUMMIES; Dummy++)
@@ -388,24 +401,46 @@ void CClient::SendInput()
 		int i = g_Config.m_ClDummy ^ Dummy;
 
 		int Size = 0;
-		if(ExtraActive && i == CONN_MAIN)
+		if(CopyAll && CopyAllSize > 0)
+		{
+			Size = CopyAllSize;
+			mem_copy(m_aInputs[i][m_aCurrentInput[i]].m_aData, aCopyAllBuf, CopyAllSize);
+		}
+		else if(ExtraActive && i == CONN_MAIN)
 		{
 			Size = sizeof(CNetObj_PlayerInput);
-			mem_zero(m_aInputs[i][m_aCurrentInput[i]].m_aData, Size);
+			const int PrevIdx = (m_aCurrentInput[i] + 199) % 200;
+			const auto *pPrev = (const CNetObj_PlayerInput *)m_aInputs[i][PrevIdx].m_aData;
+			auto *pInput = (CNetObj_PlayerInput *)m_aInputs[i][m_aCurrentInput[i]].m_aData;
+			*pInput = {};
+			pInput->m_TargetX = pPrev->m_TargetX;
+			pInput->m_TargetY = pPrev->m_TargetY;
+			pInput->m_WantedWeapon = pPrev->m_WantedWeapon;
+			pInput->m_NextWeapon = pPrev->m_NextWeapon;
+			pInput->m_PrevWeapon = pPrev->m_PrevWeapon;
 		}
 		else
 		{
 			Size = GameClient()->OnSnapInput(m_aInputs[i][m_aCurrentInput[i]].m_aData, Dummy, Force);
+
+			if(!Dummy && m_aSuppressFireTicks[i] > 0)
+			{
+				m_aSuppressFireTicks[i]--;
+				if(Size >= (int)sizeof(CNetObj_PlayerInput))
+				{
+					auto *pInput = (CNetObj_PlayerInput *)m_aInputs[i][m_aCurrentInput[i]].m_aData;
+					pInput->m_Fire = 0;
+				}
+			}
 		}
 
 		if(Size > 0)
 		{
 			auto &Input = m_aInputs[i][m_aCurrentInput[i]];
-			if(ExtraActive && i == CONN_MAIN)
+			if(ExtraActive && i == CONN_MAIN && !CopyAll)
 			{
-				// Main в простое — тик растёт от main-ack, чтобы не отправлять extra-тики на main-сервер
-				Input.m_Tick = std::max(m_aAckGameTick[CONN_MAIN], 0) + 1;
-				Input.m_PredictedTime = (int64_t)Input.m_Tick * time_freq() / GameTickSpeed();
+				Input.m_Tick = (int)(m_aGameTime[CONN_MAIN].Get(Now) * GameTickSpeed() / time_freq()) + 1;
+				Input.m_PredictedTime = m_aGameTime[CONN_MAIN].Get(Now);
 			}
 			else
 			{
@@ -414,6 +449,7 @@ void CClient::SendInput()
 			}
 			Input.m_PredictionMargin = PredictionMargin() * time_freq() / 1000;
 			Input.m_Time = Now;
+
 			CMsgPacker Msg(NETMSG_INPUT, true);
 			Msg.AddInt(m_aAckGameTick[i]);
 			Msg.AddInt(Input.m_Tick);
@@ -430,38 +466,75 @@ void CClient::SendInput()
 		}
 	}
 
-	if(m_aNetClient[CONN_EXTRA].State() == NETSTATE_ONLINE)
+	for(int ExtraIdx = 0; ExtraIdx < IClient::NUM_EXTRA_CONNS; ExtraIdx++)
 	{
+		const int Conn = IClient::ExtraIndexToConn(ExtraIdx);
+		if(m_aNetClient[Conn].State() != NETSTATE_ONLINE)
+			continue;
+
 		int Size = 0;
-		if(ExtraActive && !g_Config.m_ClDummy)
+		const bool ThisActive = (m_ActiveConn == Conn && !g_Config.m_ClDummy);
+
+		if(CopyAll && CopyAllSize > 0)
 		{
-			Size = GameClient()->OnSnapInput(m_aInputs[CONN_EXTRA][m_aCurrentInput[CONN_EXTRA]].m_aData, 0, true);
+			Size = CopyAllSize;
+			mem_copy(m_aInputs[Conn][m_aCurrentInput[Conn]].m_aData, aCopyAllBuf, CopyAllSize);
+		}
+		else if(ThisActive)
+		{
+			Size = GameClient()->OnSnapInput(m_aInputs[Conn][m_aCurrentInput[Conn]].m_aData, 0, true);
+
+			if(m_aSuppressFireTicks[Conn] > 0)
+			{
+				m_aSuppressFireTicks[Conn]--;
+				if(Size >= (int)sizeof(CNetObj_PlayerInput))
+				{
+					auto *pInput = (CNetObj_PlayerInput *)m_aInputs[Conn][m_aCurrentInput[Conn]].m_aData;
+					pInput->m_Fire = 0;
+				}
+			}
 		}
 		else
 		{
 			Size = sizeof(CNetObj_PlayerInput);
-			mem_zero(m_aInputs[CONN_EXTRA][m_aCurrentInput[CONN_EXTRA]].m_aData, Size);
+			const int PrevIdx = (m_aCurrentInput[Conn] + 199) % 200;
+			const auto *pPrev = (const CNetObj_PlayerInput *)m_aInputs[Conn][PrevIdx].m_aData;
+			auto *pInput = (CNetObj_PlayerInput *)m_aInputs[Conn][m_aCurrentInput[Conn]].m_aData;
+			*pInput = {};
+			pInput->m_TargetX = pPrev->m_TargetX;
+			pInput->m_TargetY = pPrev->m_TargetY;
+			pInput->m_WantedWeapon = pPrev->m_WantedWeapon;
+			pInput->m_NextWeapon = pPrev->m_NextWeapon;
+			pInput->m_PrevWeapon = pPrev->m_PrevWeapon;
 		}
 
 		if(Size > 0)
 		{
-			auto &Input = m_aInputs[CONN_EXTRA][m_aCurrentInput[CONN_EXTRA]];
+			auto &Input = m_aInputs[Conn][m_aCurrentInput[Conn]];
 			Input.m_Tick = m_aPredTick[g_Config.m_ClDummy];
 			Input.m_PredictedTime = m_PredictedTime.Get(Now);
 			Input.m_PredictionMargin = PredictionMargin() * time_freq() / 1000;
 			Input.m_Time = Now;
 
+			if(g_Config.m_Debug && CopyAll)
+			{
+				auto *pIn = (CNetObj_PlayerInput *)Input.m_aData;
+				log_info("copyall", "conn=%d ack=%d tick=%d dir=%d jump=%d fire=%d hook=%d",
+					Conn, m_aAckGameTick[Conn], Input.m_Tick,
+					pIn->m_Direction, pIn->m_Jump, pIn->m_Fire, pIn->m_Hook);
+			}
+
 			CMsgPacker Msg(NETMSG_INPUT, true);
-			Msg.AddInt(m_aAckGameTick[CONN_EXTRA]);
+			Msg.AddInt(m_aAckGameTick[Conn]);
 			Msg.AddInt(Input.m_Tick);
 			Msg.AddInt(Size);
 			for(int k = 0; k < Size / 4; k++)
 				Msg.AddInt(Input.m_aData[k]);
 
-			m_aCurrentInput[CONN_EXTRA]++;
-			m_aCurrentInput[CONN_EXTRA] %= 200;
+			m_aCurrentInput[Conn]++;
+			m_aCurrentInput[Conn] %= 200;
 
-			SendMsg(CONN_EXTRA, &Msg, MSGFLAG_FLUSH);
+			SendMsg(Conn, &Msg, MSGFLAG_FLUSH);
 		}
 	}
 }
@@ -474,15 +547,16 @@ const char *CClient::LatestVersion() const
 
 int *CClient::GetExtraInput(int Tick) const
 {
+	const int Conn = IClient::IsExtraConn(m_ActiveConn) ? m_ActiveConn : CONN_EXTRA1;
 	int Best = -1;
 	for(int i = 0; i < 200; i++)
 	{
-		if(m_aInputs[CONN_EXTRA][i].m_Tick != -1 && m_aInputs[CONN_EXTRA][i].m_Tick <= Tick &&
-			(Best == -1 || m_aInputs[CONN_EXTRA][Best].m_Tick < m_aInputs[CONN_EXTRA][i].m_Tick))
+		if(m_aInputs[Conn][i].m_Tick != -1 && m_aInputs[Conn][i].m_Tick <= Tick &&
+			(Best == -1 || m_aInputs[Conn][Best].m_Tick < m_aInputs[Conn][i].m_Tick))
 			Best = i;
 	}
 	if(Best != -1)
-		return (int *)m_aInputs[CONN_EXTRA][Best].m_aData;
+		return (int *)m_aInputs[Conn][Best].m_aData;
 	return nullptr;
 }
 
@@ -500,10 +574,26 @@ int *CClient::GetMainInput(int Tick) const
 	return nullptr;
 }
 
+int *CClient::GetInputForConn(int Conn, int Tick) const
+{
+	if(Conn < 0 || Conn >= NUM_CONNS)
+		return nullptr;
+	int Best = -1;
+	for(int i = 0; i < 200; i++)
+	{
+		if(m_aInputs[Conn][i].m_Tick != -1 && m_aInputs[Conn][i].m_Tick <= Tick &&
+			(Best == -1 || m_aInputs[Conn][Best].m_Tick < m_aInputs[Conn][i].m_Tick))
+			Best = i;
+	}
+	if(Best != -1)
+		return (int *)m_aInputs[Conn][Best].m_aData;
+	return nullptr;
+}
+
 int *CClient::GetInput(int Tick, int IsDummy) const
 {
 	int Best = -1;
-	const int d = (m_ActiveConn == CONN_EXTRA && !IsDummy && !g_Config.m_ClDummy) ? CONN_EXTRA : (IsDummy ^ g_Config.m_ClDummy);
+	const int d = (IClient::IsExtraConn(m_ActiveConn) && !IsDummy && !g_Config.m_ClDummy) ? m_ActiveConn : (IsDummy ^ g_Config.m_ClDummy);
 	for(int i = 0; i < 200; i++)
 	{
 		if(m_aInputs[d][i].m_Tick != -1 && m_aInputs[d][i].m_Tick <= Tick && (Best == -1 || m_aInputs[d][Best].m_Tick < m_aInputs[d][i].m_Tick))
@@ -564,8 +654,12 @@ void CClient::OnEnterGame(bool Dummy)
 	for(int i = 0; i < 200; i++)
 	{
 		m_aInputs[Dummy][i].m_Tick = -1;
+		auto *pInput = (CNetObj_PlayerInput *)m_aInputs[Dummy][i].m_aData;
+		pInput->m_Fire = 0;
 	}
 	m_aCurrentInput[Dummy] = 0;
+	if(Dummy == 1)
+		GameClient()->ResetPlayerInput(1);
 
 	// reset snapshots
 	m_aapSnapshots[Dummy][SNAP_CURRENT] = nullptr;
@@ -707,10 +801,14 @@ void CClient::GenerateTimeoutCodes(const NETADDR *pAddrs, int NumAddrs)
 	}
 }
 
-void CClient::ExtraConnect(const char *pAddress)
+void CClient::ExtraConnect(int Index, const char *pAddress)
 {
+	if(Index < 0 || Index >= IClient::NUM_EXTRA_CONNS)
+		return;
+	const int Conn = IClient::ExtraIndexToConn(Index);
+
 	char aBuf[256];
-	str_format(aBuf, sizeof(aBuf), "Attempting extra connection to: %s", pAddress);
+	str_format(aBuf, sizeof(aBuf), "Attempting extra%d connection to: %s", Index + 1, pAddress);
 	m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "client", aBuf);
 
 	NETADDR Addr;
@@ -718,7 +816,7 @@ void CClient::ExtraConnect(const char *pAddress)
 	{
 		char aHost[128];
 		str_copy(aHost, pAddress);
-		if(net_host_lookup(aHost, &Addr, m_aNetClient[CONN_EXTRA].NetType()) != 0)
+		if(net_host_lookup(aHost, &Addr, m_aNetClient[Conn].NetType()) != 0)
 		{
 			m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "client", "Could not resolve address.");
 			return;
@@ -728,33 +826,33 @@ void CClient::ExtraConnect(const char *pAddress)
 	if(Addr.port == 0)
 		Addr.port = 8303;
 
-	if(m_aNetClient[CONN_EXTRA].State() != NETSTATE_OFFLINE)
+	if(m_aNetClient[Conn].State() != NETSTATE_OFFLINE)
 	{
-		m_aNetClient[CONN_EXTRA].Disconnect("reconnecting");
+		m_aNetClient[Conn].Disconnect("reconnecting");
 	}
 
-	m_ExtraConnectionId = RandomUuid();
+	m_aExtraConnectionId[Index] = RandomUuid();
 
 	for(int i = 0; i < 200; i++)
-		m_aInputs[CONN_EXTRA][i].m_Tick = -1;
-	m_aCurrentInput[CONN_EXTRA] = 0;
-	m_ExtraPredTick = 1;
-	m_aExtraCurrentRecvTick = 0;
-	m_aExtraReceivedSnapshots = 0;
-	m_LastExtraSentTick = -1;
-	m_aExtraSnapshotParts = 0;
-	m_aExtraSnapshotIncomingDataSize = 0;
-	m_aAckGameTick[CONN_EXTRA] = -1;
-	m_aDidPostConnect[CONN_EXTRA] = false;
-	m_aapExtraSnapshots[SNAP_CURRENT] = nullptr;
-	m_aapExtraSnapshots[SNAP_PREV] = nullptr;
-	m_aapSnapshots[CONN_EXTRA][SNAP_CURRENT] = nullptr;
-	m_aapSnapshots[CONN_EXTRA][SNAP_PREV] = nullptr;
-	m_ExtraSnapshotStorage.PurgeAll();
+		m_aInputs[Conn][i].m_Tick = -1;
+	m_aCurrentInput[Conn] = 0;
+	m_aExtraPredTick[Index] = 1;
+	m_aExtraCurrentRecvTick[Index] = 0;
+	m_aExtraReceivedSnapshots[Index] = 0;
+	m_aLastExtraSentTick[Index] = -1;
+	m_aExtraSnapshotParts[Index] = 0;
+	m_aExtraSnapshotIncomingDataSize[Index] = 0;
+	m_aAckGameTick[Conn] = -1;
+	m_aDidPostConnect[Conn] = false;
+	m_aapExtraSnapshots[Index][SNAP_CURRENT] = nullptr;
+	m_aapExtraSnapshots[Index][SNAP_PREV] = nullptr;
+	m_aapSnapshots[Conn][SNAP_CURRENT] = nullptr;
+	m_aapSnapshots[Conn][SNAP_PREV] = nullptr;
+	m_aExtraSnapshotStorage[Index].PurgeAll();
 
-	m_aNetClient[CONN_EXTRA].Connect(&Addr, 1);
-	m_ExtraSendConnInfo = true;
-	
+	m_aNetClient[Conn].Connect(&Addr, 1);
+	m_aExtraSendConnInfo[Index] = true;
+
 	m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "client", "Extra connection initiated.");
 }
 
@@ -765,24 +863,37 @@ void CClient::DisconnectWithReason(const char *pReason)
 
 	DummyDisconnect(pReason);
 
-	// Отключаем extra тоже
-	if(m_aNetClient[CONN_EXTRA].State() != NETSTATE_OFFLINE)
+	// Сброс fire во всех буферах — иначе после reconnect боты стреляют
+	GameClient()->ResetPlayerInput(0);
+	GameClient()->ResetPlayerInput(1);
+	for(int ci = 0; ci < NUM_CONNS; ci++)
 	{
-		m_aNetClient[CONN_EXTRA].Disconnect(pReason);
+		for(int j = 0; j < 200; j++)
+		{
+			auto *pInput = (CNetObj_PlayerInput *)m_aInputs[ci][j].m_aData;
+			pInput->m_Fire = 0;
+		}
+	}
+
+	for(int ExtraIdx = 0; ExtraIdx < IClient::NUM_EXTRA_CONNS; ExtraIdx++)
+	{
+		const int Conn = IClient::ExtraIndexToConn(ExtraIdx);
+		if(m_aNetClient[Conn].State() != NETSTATE_OFFLINE)
+			m_aNetClient[Conn].Disconnect(pReason);
+		m_aExtraSendConnInfo[ExtraIdx] = false;
+		m_aExtraPredTick[ExtraIdx] = 1;
+		m_aExtraReceivedSnapshots[ExtraIdx] = 0;
+		m_aExtraCurrentRecvTick[ExtraIdx] = 0;
+		m_aapExtraSnapshots[ExtraIdx][SNAP_CURRENT] = nullptr;
+		m_aapExtraSnapshots[ExtraIdx][SNAP_PREV] = nullptr;
+		m_aapSnapshots[Conn][SNAP_CURRENT] = nullptr;
+		m_aapSnapshots[Conn][SNAP_PREV] = nullptr;
+		m_aExtraSnapshotParts[ExtraIdx] = 0;
+		m_aExtraSnapshotIncomingDataSize[ExtraIdx] = 0;
+		m_aLastExtraSentTick[ExtraIdx] = -1;
+		m_aExtraSnapshotStorage[ExtraIdx].PurgeAll();
 	}
 	m_ActiveConn = CONN_MAIN;
-	m_ExtraSendConnInfo = false;
-	m_ExtraPredTick = 1;
-	m_aExtraReceivedSnapshots = 0;
-	m_aExtraCurrentRecvTick = 0;
-	m_aapExtraSnapshots[SNAP_CURRENT] = nullptr;
-	m_aapExtraSnapshots[SNAP_PREV] = nullptr;
-	m_aapSnapshots[CONN_EXTRA][SNAP_CURRENT] = nullptr;
-	m_aapSnapshots[CONN_EXTRA][SNAP_PREV] = nullptr;
-	m_aExtraSnapshotParts = 0;
-	m_aExtraSnapshotIncomingDataSize = 0;
-	m_LastExtraSentTick = -1;
-	m_ExtraSnapshotStorage.PurgeAll();
 	m_PredictedTime.Init(0);
 
 	char aBuf[512];
@@ -828,12 +939,15 @@ void CClient::DisconnectWithReason(const char *pReason)
 	// clear snapshots
 	m_aapSnapshots[0][SNAP_CURRENT] = nullptr;
 	m_aapSnapshots[0][SNAP_PREV] = nullptr;
-	m_aapExtraSnapshots[SNAP_CURRENT] = nullptr;
-	m_aapExtraSnapshots[SNAP_PREV] = nullptr;
-	m_ExtraSnapshotStorage.PurgeAll();
-	m_aExtraReceivedSnapshots = 0;
-	m_aExtraSnapshotParts = 0;
-	m_aExtraSnapshotIncomingDataSize = 0;
+	for(int ExtraIdx = 0; ExtraIdx < IClient::NUM_EXTRA_CONNS; ExtraIdx++)
+	{
+		m_aapExtraSnapshots[ExtraIdx][SNAP_CURRENT] = nullptr;
+		m_aapExtraSnapshots[ExtraIdx][SNAP_PREV] = nullptr;
+		m_aExtraSnapshotStorage[ExtraIdx].PurgeAll();
+		m_aExtraReceivedSnapshots[ExtraIdx] = 0;
+		m_aExtraSnapshotParts[ExtraIdx] = 0;
+		m_aExtraSnapshotIncomingDataSize[ExtraIdx] = 0;
+	}
 	m_aReceivedSnapshots[0] = 0;
 	m_LastDummy = false;
 
@@ -967,13 +1081,15 @@ void CClient::LoadDebugFont()
 
 bool CClient::IsExtraSnapshotActive() const
 {
-	return m_ActiveConn == CONN_EXTRA && g_Config.m_ClDummy == 0 && m_aapExtraSnapshots[SNAP_CURRENT] != nullptr;
+	const int Idx = ActiveExtraIndex();
+	return Idx >= 0 && g_Config.m_ClDummy == 0 && m_aapExtraSnapshots[Idx][SNAP_CURRENT] != nullptr;
 }
 
 const CSnapshotStorage::CHolder *CClient::GetActiveSnapshot(int SnapId) const
 {
-	if(IsExtraSnapshotActive() && m_aapExtraSnapshots[SnapId])
-		return m_aapExtraSnapshots[SnapId];
+	const int Idx = ActiveExtraIndex();
+	if(Idx >= 0 && g_Config.m_ClDummy == 0 && m_aapExtraSnapshots[Idx][SnapId])
+		return m_aapExtraSnapshots[Idx][SnapId];
 	return m_aapSnapshots[g_Config.m_ClDummy][SnapId];
 }
 
@@ -1829,7 +1945,7 @@ void CClient::ProcessServerPacket(CNetChunk *pPacket, int Conn, bool Dummy)
 				pMapUrl = MapDetails->m_aUrl[0] ? MapDetails->m_aUrl : nullptr;
 			}
 
-			if(Conn == CONN_EXTRA && GameClient()->Map()->IsLoaded())
+			if(IClient::IsExtraConn(Conn) && GameClient()->Map()->IsLoaded())
 			{
 				// Карта уже загружена через main, не перезагружаем
 				m_pConsole->Print(IConsole::OUTPUT_LEVEL_ADDINFO, "client/network", "map already loaded, sending ready");
@@ -1967,11 +2083,11 @@ void CClient::ProcessServerPacket(CNetChunk *pPacket, int Conn, bool Dummy)
 				m_DummyDeactivateOnReconnect = false;
 			}
 		}
-		else if(Conn == CONN_EXTRA && Msg == NETMSG_CON_READY)
+		else if(IClient::IsExtraConn(Conn) && Msg == NETMSG_CON_READY)
 		{
 			m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "client", "Extra connection ready.");
-			SendEnterGame(CONN_EXTRA);
-			m_aDidPostConnect[CONN_EXTRA] = false;
+			SendEnterGame(Conn);
+			m_aDidPostConnect[Conn] = false;
 		}
 		else if(Conn == CONN_MAIN && (pPacket->m_Flags & NET_CHUNKFLAG_VITAL) != 0 && Msg == NETMSG_CON_READY)
 		{
@@ -2067,11 +2183,9 @@ void CClient::ProcessServerPacket(CNetChunk *pPacket, int Conn, bool Dummy)
 				m_LastDummyConnectTime = 0.0f;
 				DummyConnect();
 			}
-			else if(Conn == CONN_EXTRA) // Наш новый слот
+			else if(IClient::IsExtraConn(Conn))
 			{
-				// Пока что просто игнорируем запрос на переподключение для Extra-слота.
-				// Позже мы научим его переподключаться правильно.
-				dbg_msg("client", "Received NETMSG_RECONNECT for CONN_EXTRA. Ignoring for now.");
+				dbg_msg("client", "Received NETMSG_RECONNECT for extra connection. Ignoring for now.");
 			}
 		}
 		else if(Conn == CONN_MAIN && (pPacket->m_Flags & NET_CHUNKFLAG_VITAL) != 0 && Msg == NETMSG_RCON_CMD_ADD)
@@ -2175,8 +2289,9 @@ void CClient::ProcessServerPacket(CNetChunk *pPacket, int Conn, bool Dummy)
 		}
 		else if(Msg == NETMSG_SNAP || Msg == NETMSG_SNAPSINGLE || Msg == NETMSG_SNAPEMPTY)
 		{
-			if(Conn == CONN_EXTRA)
+			if(IClient::IsExtraConn(Conn))
 			{
+				const int ExtraIdx = IClient::ExtraConnToIndex(Conn);
 				int GameTick = Unpacker.GetInt();
 				int DeltaTick = GameTick - Unpacker.GetInt();
 				int NumParts = 1;
@@ -2197,43 +2312,43 @@ void CClient::ProcessServerPacket(CNetChunk *pPacket, int Conn, bool Dummy)
 				if(Unpacker.Error() || NumParts < 1 || NumParts > CSnapshot::MAX_PARTS || Part < 0 || Part >= NumParts || PartSize < 0 || PartSize > MAX_SNAPSHOT_PACKSIZE)
 					return;
 
-				if(GameTick >= m_aExtraCurrentRecvTick && GameTick > m_aAckGameTick[CONN_EXTRA])
+				if(GameTick >= m_aExtraCurrentRecvTick[ExtraIdx] && GameTick > m_aAckGameTick[Conn])
 				{
-					if(GameTick != m_aExtraCurrentRecvTick)
+					if(GameTick != m_aExtraCurrentRecvTick[ExtraIdx])
 					{
-						m_aExtraSnapshotParts = 0;
-						m_aExtraCurrentRecvTick = GameTick;
-						m_aExtraSnapshotIncomingDataSize = 0;
+						m_aExtraSnapshotParts[ExtraIdx] = 0;
+						m_aExtraCurrentRecvTick[ExtraIdx] = GameTick;
+						m_aExtraSnapshotIncomingDataSize[ExtraIdx] = 0;
 					}
-					mem_copy(m_aaExtraSnapshotIncomingData + Part * MAX_SNAPSHOT_PACKSIZE, pData, std::clamp(PartSize, 0, (int)sizeof(m_aaExtraSnapshotIncomingData) - Part * MAX_SNAPSHOT_PACKSIZE));
-					m_aExtraSnapshotParts |= (uint64_t)(1) << Part;
+					mem_copy(m_aaExtraSnapshotIncomingData[ExtraIdx] + Part * MAX_SNAPSHOT_PACKSIZE, pData, std::clamp(PartSize, 0, (int)sizeof(m_aaExtraSnapshotIncomingData[ExtraIdx]) - Part * MAX_SNAPSHOT_PACKSIZE));
+					m_aExtraSnapshotParts[ExtraIdx] |= (uint64_t)(1) << Part;
 
 					if(Part == NumParts - 1)
-						m_aExtraSnapshotIncomingDataSize = (NumParts - 1) * MAX_SNAPSHOT_PACKSIZE + PartSize;
+						m_aExtraSnapshotIncomingDataSize[ExtraIdx] = (NumParts - 1) * MAX_SNAPSHOT_PACKSIZE + PartSize;
 
-					if((NumParts < CSnapshot::MAX_PARTS && m_aExtraSnapshotParts == (((uint64_t)(1) << NumParts) - 1)) ||
-						(NumParts == CSnapshot::MAX_PARTS && m_aExtraSnapshotParts == std::numeric_limits<uint64_t>::max()))
+					if((NumParts < CSnapshot::MAX_PARTS && m_aExtraSnapshotParts[ExtraIdx] == (((uint64_t)(1) << NumParts) - 1)) ||
+						(NumParts == CSnapshot::MAX_PARTS && m_aExtraSnapshotParts[ExtraIdx] == std::numeric_limits<uint64_t>::max()))
 					{
 						CSnapshotDeltaBuffer TmpBuffer2;
 						CSnapshotBuffer TmpBuffer3;
-						m_aExtraSnapshotParts = 0;
+						m_aExtraSnapshotParts[ExtraIdx] = 0;
 
 						const CSnapshot *pDeltaShot = CSnapshot::EmptySnapshot();
 						if(DeltaTick >= 0)
 						{
-							int DeltashotSize = m_ExtraSnapshotStorage.Get(DeltaTick, nullptr, &pDeltaShot, nullptr);
+							int DeltashotSize = m_aExtraSnapshotStorage[ExtraIdx].Get(DeltaTick, nullptr, &pDeltaShot, nullptr);
 							if(DeltashotSize < 0)
 							{
-								m_aAckGameTick[CONN_EXTRA] = -1;
+								m_aAckGameTick[Conn] = -1;
 								return;
 							}
 						}
 
 						const void *pDeltaData = SnapshotDelta()->EmptyDelta();
 						int DeltaSize = sizeof(int) * 3;
-						if(m_aExtraSnapshotIncomingDataSize)
+						if(m_aExtraSnapshotIncomingDataSize[ExtraIdx])
 						{
-							int IntSize = CVariableInt::Decompress(m_aaExtraSnapshotIncomingData, m_aExtraSnapshotIncomingDataSize, TmpBuffer2.m_aData, sizeof(TmpBuffer2.m_aData));
+							int IntSize = CVariableInt::Decompress(m_aaExtraSnapshotIncomingData[ExtraIdx], m_aExtraSnapshotIncomingDataSize[ExtraIdx], TmpBuffer2.m_aData, sizeof(TmpBuffer2.m_aData));
 							if(IntSize < 0)
 								return;
 							pDeltaData = TmpBuffer2.m_aData;
@@ -2251,36 +2366,36 @@ void CClient::ProcessServerPacket(CNetChunk *pPacket, int Conn, bool Dummy)
 						if(AltSnapSize < 0)
 							return;
 
-						m_ExtraSnapshotStorage.Add(GameTick, time_get(), SnapSize, TmpBuffer3.AsSnapshot(), AltSnapSize, AltSnapBuffer.AsSnapshot());
+						m_aExtraSnapshotStorage[ExtraIdx].Add(GameTick, time_get(), SnapSize, TmpBuffer3.AsSnapshot(), AltSnapSize, AltSnapBuffer.AsSnapshot());
 
-						if(m_ActiveConn == CONN_EXTRA)
+						if(m_ActiveConn == Conn)
 						{
-							const bool FirstSnapshot = m_aExtraReceivedSnapshots == 0;
+							const bool FirstSnapshot = m_aExtraReceivedSnapshots[ExtraIdx] == 0;
 							if(FirstSnapshot)
 							{
-								m_aapExtraSnapshots[SNAP_PREV] = m_ExtraSnapshotStorage.m_pFirst;
-								m_aapExtraSnapshots[SNAP_CURRENT] = m_ExtraSnapshotStorage.m_pLast;
-								m_aapSnapshots[CONN_EXTRA][SNAP_PREV] = m_aapExtraSnapshots[SNAP_PREV];
-								m_aapSnapshots[CONN_EXTRA][SNAP_CURRENT] = m_aapExtraSnapshots[SNAP_CURRENT];
+								m_aapExtraSnapshots[ExtraIdx][SNAP_PREV] = m_aExtraSnapshotStorage[ExtraIdx].m_pFirst;
+								m_aapExtraSnapshots[ExtraIdx][SNAP_CURRENT] = m_aExtraSnapshotStorage[ExtraIdx].m_pLast;
+								m_aapSnapshots[Conn][SNAP_PREV] = m_aapExtraSnapshots[ExtraIdx][SNAP_PREV];
+								m_aapSnapshots[Conn][SNAP_CURRENT] = m_aapExtraSnapshots[ExtraIdx][SNAP_CURRENT];
 
-								m_aCurGameTick[g_Config.m_ClDummy] = m_aapExtraSnapshots[SNAP_CURRENT]->m_Tick;
-								m_aPrevGameTick[g_Config.m_ClDummy] = m_aapExtraSnapshots[SNAP_PREV]->m_Tick;
+								m_aCurGameTick[g_Config.m_ClDummy] = m_aapExtraSnapshots[ExtraIdx][SNAP_CURRENT]->m_Tick;
+								m_aPrevGameTick[g_Config.m_ClDummy] = m_aapExtraSnapshots[ExtraIdx][SNAP_PREV]->m_Tick;
 								m_PredictedTime.Init(m_aCurGameTick[g_Config.m_ClDummy] * time_freq() / GameTickSpeed());
 								m_PredictedTime.SetAdjustSpeed(CSmoothTime::ADJUSTDIRECTION_UP, 1000.0f);
 								m_PredictedTime.UpdateMargin(PredictionMargin() * time_freq() / 1000);
 								m_aGameTime[g_Config.m_ClDummy].Init((m_aCurGameTick[g_Config.m_ClDummy] - 1) * time_freq() / GameTickSpeed());
 								m_aPredTick[g_Config.m_ClDummy] = m_aCurGameTick[g_Config.m_ClDummy] + 1;
-								m_LastExtraSentTick = -1;
+								m_aLastExtraSentTick[ExtraIdx] = -1;
 
 								GameClient()->OnNewSnapshot(false);
 							}
-							m_aExtraReceivedSnapshots++;
+							m_aExtraReceivedSnapshots[ExtraIdx]++;
 						}
 
-						if(GameTick > m_aAckGameTick[CONN_EXTRA])
-							m_aAckGameTick[CONN_EXTRA] = GameTick;
-						if(m_ExtraPredTick < GameTick + 1)
-							m_ExtraPredTick = GameTick + 1;
+						if(GameTick > m_aAckGameTick[Conn])
+							m_aAckGameTick[Conn] = GameTick;
+						if(m_aExtraPredTick[ExtraIdx] < GameTick + 1)
+							m_aExtraPredTick[ExtraIdx] = GameTick + 1;
 					}
 				}
 				return;
@@ -2481,7 +2596,7 @@ void CClient::ProcessServerPacket(CNetChunk *pPacket, int Conn, bool Dummy)
 					m_aReceivedSnapshots[Conn]++;
 
 					// Main clock не трогаем пока extra активен, иначе m_aGameTime[0] дерутся
-					const bool SkipMainClock = (Conn == CONN_MAIN && m_ActiveConn == CONN_EXTRA);
+					const bool SkipMainClock = (Conn == CONN_MAIN && IClient::IsExtraConn(m_ActiveConn));
 
 					// we got two snapshots until we see us self as connected
 					if(m_aReceivedSnapshots[Conn] == 2)
@@ -2607,7 +2722,22 @@ void CClient::ProcessServerPacket(CNetChunk *pPacket, int Conn, bool Dummy)
 			}
 		}
 
-		if(Conn != CONN_EXTRA || Msg == NETMSGTYPE_SV_PREINPUT)
+		const bool IsActiveExtra = IClient::IsExtraConn(Conn) && Conn == m_ActiveConn;
+		const bool IsExtraMsgPreinput = Msg == NETMSGTYPE_SV_PREINPUT;
+
+		// Preinput принимаем ТОЛЬКО от активного соединения.
+		// Иначе m_aPreInputs[X] перезаписывается данными от main/extra1/extra2
+		// с разными тиками, ApplyPreInputs не находит совпадений и замораживает X → фантом.
+		if(IsExtraMsgPreinput)
+		{
+			const int ExpectedConn = (IClient::IsExtraConn(m_ActiveConn) && !g_Config.m_ClDummy)
+				? m_ActiveConn
+				: (g_Config.m_ClDummy ? CONN_DUMMY : CONN_MAIN);
+			if(Conn != ExpectedConn)
+				return;
+		}
+
+		if(!IClient::IsExtraConn(Conn) || IsActiveExtra || IsExtraMsgPreinput)
 			GameClient()->OnMessage(Msg, &Unpacker, Conn, Dummy);
 	}
 }
@@ -2888,17 +3018,23 @@ void CClient::PumpNetwork()
 					GameClient()->Echo(aBuf);
 				}
 			}
-			if(m_aNetClient[CONN_EXTRA].State() == NETSTATE_OFFLINE && (m_aapExtraSnapshots[SNAP_CURRENT] || m_ActiveConn == CONN_EXTRA))
+			for(int ExtraIdx = 0; ExtraIdx < IClient::NUM_EXTRA_CONNS; ExtraIdx++)
 			{
-				m_ActiveConn = CONN_MAIN;
-				m_aExtraReceivedSnapshots = 0;
-				m_aapExtraSnapshots[SNAP_CURRENT] = nullptr;
-				m_aapExtraSnapshots[SNAP_PREV] = nullptr;
-				m_aapSnapshots[CONN_EXTRA][SNAP_CURRENT] = nullptr;
-				m_aapSnapshots[CONN_EXTRA][SNAP_PREV] = nullptr;
-				m_ExtraPredTick = 1;
-				m_LastExtraSentTick = -1;
-				m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "client", "== Control: MAIN (Extra lost) ==");
+				const int Conn = IClient::ExtraIndexToConn(ExtraIdx);
+				if(m_aNetClient[Conn].State() == NETSTATE_OFFLINE &&
+					(m_aapExtraSnapshots[ExtraIdx][SNAP_CURRENT] || m_ActiveConn == Conn))
+				{
+					if(m_ActiveConn == Conn)
+						m_ActiveConn = CONN_MAIN;
+					m_aExtraReceivedSnapshots[ExtraIdx] = 0;
+					m_aapExtraSnapshots[ExtraIdx][SNAP_CURRENT] = nullptr;
+					m_aapExtraSnapshots[ExtraIdx][SNAP_PREV] = nullptr;
+					m_aapSnapshots[Conn][SNAP_CURRENT] = nullptr;
+					m_aapSnapshots[Conn][SNAP_PREV] = nullptr;
+					m_aExtraPredTick[ExtraIdx] = 1;
+					m_aLastExtraSentTick[ExtraIdx] = -1;
+					m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "client", "== Control: MAIN (Extra lost) ==");
+				}
 			}
 		}
 
@@ -2922,23 +3058,23 @@ void CClient::PumpNetwork()
 			GameClient()->SendDummyInfo(true);
 			SendEnterGame(CONN_DUMMY);
 		}
-		if(m_ActiveConn == CONN_EXTRA && m_aNetClient[CONN_EXTRA].State() == NETSTATE_OFFLINE)
+		if(IClient::IsExtraConn(m_ActiveConn) && m_aNetClient[m_ActiveConn].State() == NETSTATE_OFFLINE)
 		{
 			m_ActiveConn = CONN_MAIN;
-			g_Config.m_ClAntiPing = m_SavedAntiPing;
-			g_Config.m_ClAntiPingPlayers = m_SavedAntiPingPlayers;
-			g_Config.m_ClAntiPingGrenade = m_SavedAntiPingGrenade;
-			g_Config.m_ClAntiPingWeapons = m_SavedAntiPingWeapons;
 			m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "client", "== Control: MAIN (Extra lost) ==");
 		}
-		if(m_ExtraSendConnInfo && m_aNetClient[CONN_EXTRA].State() == NETSTATE_ONLINE)
+		for(int ExtraIdx = 0; ExtraIdx < IClient::NUM_EXTRA_CONNS; ExtraIdx++)
 		{
-			m_ExtraSendConnInfo = false;
-			SendInfo(CONN_EXTRA);
-			SendReady(CONN_EXTRA);
-			SendExtraInfo();
-			m_ExtraPredTick = 1;
-			m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "client", "Extra connection established (socket online).");
+			const int Conn = IClient::ExtraIndexToConn(ExtraIdx);
+			if(m_aExtraSendConnInfo[ExtraIdx] && m_aNetClient[Conn].State() == NETSTATE_ONLINE)
+			{
+				m_aExtraSendConnInfo[ExtraIdx] = false;
+				SendInfo(Conn);
+				SendReady(Conn);
+				SendExtraInfo(Conn);
+				m_aExtraPredTick[ExtraIdx] = 1;
+				m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "client", "Extra connection established (socket online).");
+			}
 		}
 	}
 
@@ -2965,7 +3101,7 @@ void CClient::PumpNetwork()
 			{
 				ProcessServerPacket(&Packet, Conn, true);
 			}
-			else if(Conn == CONN_EXTRA)
+			else if(IClient::IsExtraConn(Conn))
 			{
 				ProcessServerPacket(&Packet, Conn, true);
 			}
@@ -3119,8 +3255,9 @@ void CClient::Update()
 			}
 		}
 
-		if(IsExtraSnapshotActive() && m_aapExtraSnapshots[SNAP_CURRENT] &&
-			m_aNetClient[CONN_EXTRA].State() == NETSTATE_ONLINE)
+		const int ActiveExtraIdx = ActiveExtraIndex();
+		if(ActiveExtraIdx >= 0 && m_aapExtraSnapshots[ActiveExtraIdx][SNAP_CURRENT] &&
+			m_aNetClient[m_ActiveConn].State() == NETSTATE_ONLINE)
 		{
 			bool Repredict = false;
 			int64_t Now = m_aGameTime[g_Config.m_ClDummy].Get(time_get());
@@ -3128,25 +3265,25 @@ void CClient::Update()
 
 			while(true)
 			{
-				if(!m_aapExtraSnapshots[SNAP_CURRENT]->m_pNext)
+				if(!m_aapExtraSnapshots[ActiveExtraIdx][SNAP_CURRENT]->m_pNext)
 					break;
-				int64_t TickStart = m_aapExtraSnapshots[SNAP_CURRENT]->m_Tick * time_freq() / GameTickSpeed();
+				int64_t TickStart = m_aapExtraSnapshots[ActiveExtraIdx][SNAP_CURRENT]->m_Tick * time_freq() / GameTickSpeed();
 				if(TickStart >= Now)
 					break;
-				m_aapExtraSnapshots[SNAP_PREV] = m_aapExtraSnapshots[SNAP_CURRENT];
-				m_aapExtraSnapshots[SNAP_CURRENT] = m_aapExtraSnapshots[SNAP_CURRENT]->m_pNext;
-				m_aapSnapshots[CONN_EXTRA][SNAP_PREV] = m_aapExtraSnapshots[SNAP_PREV];
-				m_aapSnapshots[CONN_EXTRA][SNAP_CURRENT] = m_aapExtraSnapshots[SNAP_CURRENT];
-				m_aCurGameTick[g_Config.m_ClDummy] = m_aapExtraSnapshots[SNAP_CURRENT]->m_Tick;
-				m_aPrevGameTick[g_Config.m_ClDummy] = m_aapExtraSnapshots[SNAP_PREV]->m_Tick;
+				m_aapExtraSnapshots[ActiveExtraIdx][SNAP_PREV] = m_aapExtraSnapshots[ActiveExtraIdx][SNAP_CURRENT];
+				m_aapExtraSnapshots[ActiveExtraIdx][SNAP_CURRENT] = m_aapExtraSnapshots[ActiveExtraIdx][SNAP_CURRENT]->m_pNext;
+				m_aapSnapshots[m_ActiveConn][SNAP_PREV] = m_aapExtraSnapshots[ActiveExtraIdx][SNAP_PREV];
+				m_aapSnapshots[m_ActiveConn][SNAP_CURRENT] = m_aapExtraSnapshots[ActiveExtraIdx][SNAP_CURRENT];
+				m_aCurGameTick[g_Config.m_ClDummy] = m_aapExtraSnapshots[ActiveExtraIdx][SNAP_CURRENT]->m_Tick;
+				m_aPrevGameTick[g_Config.m_ClDummy] = m_aapExtraSnapshots[ActiveExtraIdx][SNAP_PREV]->m_Tick;
 				GameClient()->OnNewSnapshot(false);
 				Repredict = true;
 			}
 
-			if(m_aapExtraSnapshots[SNAP_PREV])
+			if(m_aapExtraSnapshots[ActiveExtraIdx][SNAP_PREV])
 			{
-				int64_t CurTickStart = m_aapExtraSnapshots[SNAP_CURRENT]->m_Tick * time_freq() / GameTickSpeed();
-				int64_t PrevTickStart = m_aapExtraSnapshots[SNAP_PREV]->m_Tick * time_freq() / GameTickSpeed();
+				int64_t CurTickStart = m_aapExtraSnapshots[ActiveExtraIdx][SNAP_CURRENT]->m_Tick * time_freq() / GameTickSpeed();
+				int64_t PrevTickStart = m_aapExtraSnapshots[ActiveExtraIdx][SNAP_PREV]->m_Tick * time_freq() / GameTickSpeed();
 				int PrevPredTick = (int)(PredNow * GameTickSpeed() / time_freq());
 				int NewPredTick = PrevPredTick + 1;
 
@@ -3158,7 +3295,7 @@ void CClient::Update()
 				int64_t PrevPredTickStart = PrevPredTick * time_freq() / GameTickSpeed();
 				m_aPredIntraTick[g_Config.m_ClDummy] = (PredNow - PrevPredTickStart) / (float)(CurPredTickStart - PrevPredTickStart);
 
-				if(absolute(NewPredTick - m_aapExtraSnapshots[SNAP_PREV]->m_Tick) > MaxLatencyTicks())
+				if(absolute(NewPredTick - m_aapExtraSnapshots[ActiveExtraIdx][SNAP_PREV]->m_Tick) > MaxLatencyTicks())
 				{
 					m_pConsole->Print(IConsole::OUTPUT_LEVEL_ADDINFO, "client", "prediction time reset!");
 					m_PredictedTime.Init(CurTickStart + 2 * time_freq() / GameTickSpeed());
@@ -3170,22 +3307,22 @@ void CClient::Update()
 					Repredict = true;
 				}
 
-				if(m_aExtraReceivedSnapshots > 2)
+				if(m_aExtraReceivedSnapshots[ActiveExtraIdx] > 2)
 				{
 					int64_t NowSmooth = m_aGameTime[g_Config.m_ClDummy].Get(time_get());
 					int64_t TimeLeft = (CurTickStart - NowSmooth) * 1000 / time_freq();
 					m_aGameTime[g_Config.m_ClDummy].Update(&m_aGametimeMarginGraphs[g_Config.m_ClDummy],
-						(m_aapExtraSnapshots[SNAP_CURRENT]->m_Tick - 1) * time_freq() / GameTickSpeed(),
+						(m_aapExtraSnapshots[ActiveExtraIdx][SNAP_CURRENT]->m_Tick - 1) * time_freq() / GameTickSpeed(),
 						TimeLeft, CSmoothTime::ADJUSTDIRECTION_DOWN);
 				}
 			}
 
-					// Если тик откатился (переключение main↔extra), сбрасываем, чтобы не блокировать отправку
-			if(m_LastExtraSentTick > m_aPredTick[g_Config.m_ClDummy])
-				m_LastExtraSentTick = -1;
-			if(m_aPredTick[g_Config.m_ClDummy] > m_LastExtraSentTick)
+			// Если тик откатился (переключение main↔extra), сбрасываем, чтобы не блокировать отправку
+			if(m_aLastExtraSentTick[ActiveExtraIdx] > m_aPredTick[g_Config.m_ClDummy])
+				m_aLastExtraSentTick[ActiveExtraIdx] = -1;
+			if(m_aPredTick[g_Config.m_ClDummy] > m_aLastExtraSentTick[ActiveExtraIdx])
 			{
-				m_LastExtraSentTick = m_aPredTick[g_Config.m_ClDummy];
+				m_aLastExtraSentTick[ActiveExtraIdx] = m_aPredTick[g_Config.m_ClDummy];
 				SendInput();
 			}
 
@@ -3321,13 +3458,9 @@ void CClient::Update()
 	{
 		static int64_t s_ActionTaken = 0;
 		int64_t Now = time_get();
-		if(m_ActiveConn == CONN_EXTRA && m_aNetClient[CONN_EXTRA].State() != NETSTATE_ONLINE)
+		if(IClient::IsExtraConn(m_ActiveConn) && m_aNetClient[m_ActiveConn].State() != NETSTATE_ONLINE)
 		{
 			m_ActiveConn = CONN_MAIN;
-			g_Config.m_ClAntiPing = m_SavedAntiPing;
-			g_Config.m_ClAntiPingPlayers = m_SavedAntiPingPlayers;
-			g_Config.m_ClAntiPingGrenade = m_SavedAntiPingGrenade;
-			g_Config.m_ClAntiPingWeapons = m_SavedAntiPingWeapons;
 		}
 		if(State() == IClient::STATE_OFFLINE)
 		{
@@ -3916,9 +4049,13 @@ bool CClient::InitNetworkClientImpl(NETADDR BindAddr, int Conn, char *pError, si
 		pPort = &g_Config.m_ClContactPort;
 		pName = "contact";
 		break;
-	case CONN_EXTRA: // Добавили кейс
+	case CONN_EXTRA1:
 		pPort = &ExtraPort;
-		pName = "extra";
+		pName = "extra1";
+		break;
+	case CONN_EXTRA2:
+		pPort = &ExtraPort;
+		pName = "extra2";
 		break;
 	default:
 		dbg_assert_failed("unreachable");
@@ -4082,35 +4219,26 @@ void CClient::Con_ToggleExtra(IConsole::IResult *pResult, void *pUserData)
 {
 	CClient *pSelf = (CClient *)pUserData;
 
-	const bool ExtraOnline = pSelf->m_aNetClient[CONN_EXTRA].State() == NETSTATE_ONLINE;
+	const bool Extra1Online = pSelf->m_aNetClient[CONN_EXTRA1].State() == NETSTATE_ONLINE;
+	const bool Extra2Online = pSelf->m_aNetClient[CONN_EXTRA2].State() == NETSTATE_ONLINE;
 	const bool DummyOnline = pSelf->DummyConnected();
 
 	// Сбросить input, чтобы fire/jump/hook не переносились на новое соединение
 	pSelf->GameClient()->ResetPlayerInput(0);
 	pSelf->GameClient()->ResetPlayerInput(1);
 
-	if(!ExtraOnline && !DummyOnline)
+	if(!Extra1Online && !Extra2Online && !DummyOnline)
 	{
 		pSelf->m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "client", "Neither extra nor dummy connected.");
 		return;
 	}
 
-	const bool OnDummy = g_Config.m_ClDummy == 1;
-	const bool OnExtra = !OnDummy && pSelf->m_ActiveConn == CONN_EXTRA;
-
-	if(OnExtra)
-	{
-		// extra -> dummy (если есть) или main
+	// Восстановить main snapshots (общий код для переходов на main)
+	auto SwitchToMain = [pSelf]() {
+		g_Config.m_ClDummy = 0;
 		pSelf->m_ActiveConn = CONN_MAIN;
-
-		if(DummyOnline)
-		{
-			g_Config.m_ClDummy = 1;
-			pSelf->m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "client", "== Control: DUMMY ==");
-			return;
-		}
-
-		// Восстановить main-снапшоты из storage
+		pSelf->m_aSuppressFireTicks[CONN_MAIN] = 3;
+		pSelf->GameClient()->ClearPreInputs();
 		auto &MainStorage = pSelf->m_aSnapshotStorage[CONN_MAIN];
 		CSnapshotStorage::CHolder *pCur = MainStorage.m_pLast;
 		CSnapshotStorage::CHolder *pPrev = nullptr;
@@ -4139,37 +4267,104 @@ void CClient::Con_ToggleExtra(IConsole::IResult *pResult, void *pUserData)
 			pSelf->GameClient()->OnNewSnapshot(true);
 		}
 		pSelf->m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "client", "== Control: MAIN ==");
-	}
-	else if(OnDummy)
-	{
-		// dummy -> main
+	};
+
+	auto SwitchToExtra = [pSelf](int Conn) {
 		g_Config.m_ClDummy = 0;
-		pSelf->m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "client", "== Control: MAIN ==");
-	}
-	else
+		pSelf->m_ActiveConn = Conn;
+		pSelf->m_aSuppressFireTicks[Conn] = 3;
+		pSelf->GameClient()->ClearPreInputs();
+		const int Idx = IClient::ExtraConnToIndex(Conn);
+		pSelf->m_aLastExtraSentTick[Idx] = -1;
+		pSelf->m_aExtraReceivedSnapshots[Idx] = 0;
+		pSelf->m_aapExtraSnapshots[Idx][SNAP_CURRENT] = nullptr;
+		pSelf->m_aapExtraSnapshots[Idx][SNAP_PREV] = nullptr;
+		pSelf->m_aapSnapshots[Conn][SNAP_CURRENT] = nullptr;
+		pSelf->m_aapSnapshots[Conn][SNAP_PREV] = nullptr;
+		pSelf->GameClient()->InvalidateSnapshot();
+		char aBuf[64];
+		str_format(aBuf, sizeof(aBuf), "== Control: EXTRA%d ==", Idx + 1);
+		pSelf->m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "client", aBuf);
+	};
+
+	auto SwitchToDummy = [pSelf]() {
+		g_Config.m_ClDummy = 1;
+		pSelf->m_ActiveConn = CONN_MAIN;
+		pSelf->m_aSuppressFireTicks[CONN_DUMMY] = 3;
+		pSelf->GameClient()->ClearPreInputs();
+		pSelf->m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "client", "== Control: DUMMY ==");
+	};
+
+	const bool OnDummy = g_Config.m_ClDummy == 1;
+	const int ActiveConn = pSelf->m_ActiveConn;
+
+	// Цикл: main -> extra1 -> extra2 -> dummy -> main
+	if(OnDummy)
 	{
-		// main -> extra (если есть) или dummy
-		if(ExtraOnline)
+		SwitchToMain();
+		return;
+	}
+
+	if(IClient::IsExtraConn(ActiveConn))
+	{
+		// extra -> extra2 (если были extra1 и extra2 онлайн) или dummy или main
+		if(ActiveConn == CONN_EXTRA1 && Extra2Online)
 		{
-			pSelf->m_ActiveConn = CONN_EXTRA;
-			pSelf->m_LastExtraSentTick = -1;
-			pSelf->m_aExtraReceivedSnapshots = 0;
-			pSelf->m_aapExtraSnapshots[SNAP_CURRENT] = nullptr;
-			pSelf->m_aapExtraSnapshots[SNAP_PREV] = nullptr;
-			pSelf->m_aapSnapshots[CONN_EXTRA][SNAP_CURRENT] = nullptr;
-			pSelf->m_aapSnapshots[CONN_EXTRA][SNAP_PREV] = nullptr;
-			pSelf->GameClient()->InvalidateSnapshot();
-			pSelf->m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "client", "== Control: EXTRA ==");
+			SwitchToExtra(CONN_EXTRA2);
+			return;
 		}
-		else if(DummyOnline)
+		if(DummyOnline)
 		{
-			g_Config.m_ClDummy = 1;
-			pSelf->m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "client", "== Control: DUMMY ==");
+			SwitchToDummy();
+			return;
 		}
+		SwitchToMain();
+		return;
+	}
+
+	// main -> extra1 -> extra2 -> dummy
+	if(Extra1Online)
+	{
+		SwitchToExtra(CONN_EXTRA1);
+		return;
+	}
+	if(Extra2Online)
+	{
+		SwitchToExtra(CONN_EXTRA2);
+		return;
+	}
+	if(DummyOnline)
+	{
+		SwitchToDummy();
+		return;
 	}
 }
+void CClient::ExtraDisconnect(int Index)
+{
+	if(Index < 0 || Index >= IClient::NUM_EXTRA_CONNS)
+		return;
+	const int Conn = IClient::ExtraIndexToConn(Index);
 
-void CClient::ConExtraConnect(IConsole::IResult *pResult, void *pUserData)
+	if(m_aNetClient[Conn].State() != NETSTATE_OFFLINE)
+		m_aNetClient[Conn].Disconnect("manual");
+	if(m_ActiveConn == Conn)
+		m_ActiveConn = CONN_MAIN;
+	m_aExtraSendConnInfo[Index] = false;
+	m_aExtraPredTick[Index] = 1;
+	m_aExtraReceivedSnapshots[Index] = 0;
+	m_aExtraCurrentRecvTick[Index] = 0;
+	m_aapExtraSnapshots[Index][SNAP_CURRENT] = nullptr;
+	m_aapExtraSnapshots[Index][SNAP_PREV] = nullptr;
+	m_aapSnapshots[Conn][SNAP_CURRENT] = nullptr;
+	m_aapSnapshots[Conn][SNAP_PREV] = nullptr;
+	m_aExtraSnapshotParts[Index] = 0;
+	m_aExtraSnapshotIncomingDataSize[Index] = 0;
+	m_aLastExtraSentTick[Index] = -1;
+	m_aSuppressFireTicks[Conn] = 0;
+	m_aExtraSnapshotStorage[Index].PurgeAll();
+}
+
+void CClient::ConExtra1Connect(IConsole::IResult *pResult, void *pUserData)
 {
 	CClient *pSelf = (CClient *)pUserData;
 	const char *pAddr = pResult->NumArguments() ? pResult->GetString(0) : pSelf->ConnectAddressString();
@@ -4178,8 +4373,29 @@ void CClient::ConExtraConnect(IConsole::IResult *pResult, void *pUserData)
 		pSelf->m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "client", "Not connected to any server, pass an address.");
 		return;
 	}
-	pSelf->ExtraConnect(pAddr);
+	pSelf->ExtraConnect(0, pAddr);
 }
+
+void CClient::ConExtra2Connect(IConsole::IResult *pResult, void *pUserData)
+{
+	CClient *pSelf = (CClient *)pUserData;
+	const char *pAddr = pResult->NumArguments() ? pResult->GetString(0) : pSelf->ConnectAddressString();
+	if(pAddr == nullptr || pAddr[0] == '\0')
+	{
+		pSelf->m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "client", "Not connected to any server, pass an address.");
+		return;
+	}
+	pSelf->ExtraConnect(1, pAddr);
+}
+
+void CClient::ConExtraDisconnect(IConsole::IResult *pResult, void *pUserData)
+{
+	CClient *pSelf = (CClient *)pUserData;
+	for(int ExtraIdx = 0; ExtraIdx < IClient::NUM_EXTRA_CONNS; ExtraIdx++)
+		pSelf->ExtraDisconnect(ExtraIdx);
+	pSelf->m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "client", "Extra disconnected.");
+}
+
 void CClient::Con_Connect(IConsole::IResult *pResult, void *pUserData)
 {
 	CClient *pSelf = (CClient *)pUserData;
@@ -5175,8 +5391,10 @@ void CClient::ConchainStdoutOutputLevel(IConsole::IResult *pResult, void *pUserD
 void CClient::RegisterCommands()
 {
 	m_pConsole = Kernel()->RequestInterface<IConsole>();
-	m_pConsole->Register("extra_connect", "?r[host|ip]", CFGFLAG_CLIENT, ConExtraConnect, this, "Connect an extra client to a server (current server if omitted)");
-	m_pConsole->Register("toggle_extra", "", CFGFLAG_CLIENT, Con_ToggleExtra, this, "Toggle control between main and extra");
+	m_pConsole->Register("extra1_connect", "?r[host|ip]", CFGFLAG_CLIENT, ConExtra1Connect, this, "Connect extra1 to a server (current server if omitted)");
+	m_pConsole->Register("extra2_connect", "?r[host|ip]", CFGFLAG_CLIENT, ConExtra2Connect, this, "Connect extra2 to a server (current server if omitted)");
+	m_pConsole->Register("extra_disconnect", "", CFGFLAG_CLIENT, ConExtraDisconnect, this, "Disconnect all extra connections");
+	m_pConsole->Register("toggle_extra", "", CFGFLAG_CLIENT, Con_ToggleExtra, this, "Cycle control: main -> extra1 -> extra2 -> dummy -> main");
 	m_pConsole->Register("dummy_connect", "", CFGFLAG_CLIENT, Con_DummyConnect, this, "Connect dummy");
 	m_pConsole->Register("dummy_disconnect", "", CFGFLAG_CLIENT, Con_DummyDisconnect, this, "Disconnect dummy");
 	m_pConsole->Register("dummy_reset", "", CFGFLAG_CLIENT, Con_DummyResetInput, this, "Reset dummy");

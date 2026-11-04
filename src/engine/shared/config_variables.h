@@ -152,6 +152,12 @@ MACRO_CONFIG_INT(ClMapDownloadLowSpeedLimit, cl_map_download_low_speed_limit, 40
 MACRO_CONFIG_INT(ClMapDownloadLowSpeedTime, cl_map_download_low_speed_time, 3, 0, 100000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "HTTP map downloads: Set low speed limit time period (0 to disable)")
 
 MACRO_CONFIG_STR(ClLanguagefile, cl_languagefile, 255, "", CFGFLAG_CLIENT | CFGFLAG_SAVE, "What language file to use")
+MACRO_CONFIG_INT(ClTestClientEmoteCycle, cl_testclient_emote_cycle, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Test client: enable emote cycle on all connections")
+MACRO_CONFIG_INT(ClTestClientCopyMovesAll, cl_testclient_copy_moves_all, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Test client: all connections copy the same input (movement, fire, hook)")
+MACRO_CONFIG_INT(ClTestClientEmoteSet, cl_testclient_emote_set, 0, 0, 2, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Test client: emote set (0=positive, 1=angry, 2=custom)")
+MACRO_CONFIG_INT(ClTestClientEmoteCustom1, cl_testclient_emote_custom1, 4, 0, 15, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Test client: custom emote 1")
+MACRO_CONFIG_INT(ClTestClientEmoteCustom2, cl_testclient_emote_custom2, 6, 0, 15, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Test client: custom emote 2")
+MACRO_CONFIG_INT(ClTestClientEmoteCustom3, cl_testclient_emote_custom3, 9, 0, 15, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Test client: custom emote 3")
 
 // skin loading
 #if defined(CONF_ARCH_IA32)

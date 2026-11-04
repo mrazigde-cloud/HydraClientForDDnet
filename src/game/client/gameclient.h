@@ -658,6 +658,7 @@ public:
 
 	int FindExtraClient() const override;
 	int FindClientByConnectionId(const CUuid &ConnectionId) const;
+	bool IsExtraName(const char *pName) const;
 	const char *GetItemName(int Type) const override;
 	const char *Version() const override;
 	const char *NetVersion() const override;
@@ -728,6 +729,21 @@ public:
 
 	void DummyResetInput() override;
 	void ResetPlayerInput(int PlayerOrDummy) override;
+	void ClearPreInputs() override;
+	int GetCurrentInput(int *pData) override;
+
+	void SendEmoteToConn(int Conn, int Emoticon);
+	void UpdateEmoteCycle();
+	static void ConEmoteCycle(IConsole::IResult *pResult, void *pUserData);
+	static void ConEmoteCycleStop(IConsole::IResult *pResult, void *pUserData);
+
+private:
+	int m_EmoteCycleBot = 0;
+	int m_EmoteCycleEmote = 0;
+	int m_EmoteCycleLastTick = -1;
+	bool m_EmoteCycleWasActive = false;
+
+public:
 	void Echo(const char *pString) override;
 	bool IsOtherTeam(int ClientId) const;
 	int SwitchStateTeam() const;

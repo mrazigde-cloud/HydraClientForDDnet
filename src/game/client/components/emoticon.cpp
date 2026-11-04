@@ -208,10 +208,7 @@ void CEmoticon::Emote(int Emoticon)
 {
 	CNetMsg_Cl_Emoticon Msg;
 	Msg.m_Emoticon = Emoticon;
-	if(Client()->IsExtraActive())
-		Client()->SendPackMsg(IClient::CONN_EXTRA, &Msg, MSGFLAG_VITAL);
-	else
-		Client()->SendPackMsgActive(&Msg, MSGFLAG_VITAL);
+	Client()->SendPackMsgActive(&Msg, MSGFLAG_VITAL);
 }
 
 void CEmoticon::EyeEmote(int Emote)

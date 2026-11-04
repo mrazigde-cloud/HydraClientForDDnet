@@ -125,9 +125,18 @@ public:
 		CONN_MAIN = 0,
 		CONN_DUMMY,
 		CONN_CONTACT,
-		CONN_EXTRA,
+		CONN_EXTRA1,
+		CONN_EXTRA2,
 		NUM_CONNS,
 	};
+
+	static constexpr int NUM_EXTRA_CONNS = 2;
+	static constexpr int CONN_EXTRA_FIRST = CONN_EXTRA1;
+	static constexpr int CONN_EXTRA_LAST = CONN_EXTRA2;
+
+	static bool IsExtraConn(int Conn) { return Conn >= CONN_EXTRA_FIRST && Conn <= CONN_EXTRA_LAST; }
+	static int ExtraConnToIndex(int Conn) { return Conn - CONN_EXTRA_FIRST; }
+	static int ExtraIndexToConn(int Index) { return CONN_EXTRA_FIRST + Index; }
 
 	enum class EConnectivity
 	{
@@ -216,9 +225,12 @@ public:
 	// actions
 	virtual void Connect(const char *pAddress, const char *pPassword = nullptr) = 0;
 	virtual void Disconnect() = 0;
-	virtual void ExtraConnect(const char *pAddress) = 0;
+	virtual void ExtraConnect(int Index, const char *pAddress) = 0;
 	virtual bool IsExtraActive() const = 0;
+	virtual void ExtraDisconnect(int Index) = 0;
+	virtual bool IsExtraConnOnline(int Conn) = 0;
 	virtual int GetExtraClientId() const = 0;
+	virtual int GetActiveExtraIndex() const = 0;
 	// dummy
 	virtual void DummyDisconnect(const char *pReason) = 0;
 	virtual void DummyConnect() = 0;
@@ -262,6 +274,7 @@ public:
 	// input
 	virtual int *GetExtraInput(int Tick) const = 0;
 	virtual int *GetMainInput(int Tick) const = 0;
+	virtual int *GetInputForConn(int Conn, int Tick) const = 0;
 	virtual int *GetInput(int Tick, int IsDummy = 0) const = 0;
 
 	// remote console
@@ -438,6 +451,8 @@ public:
 	virtual void OnDummyDisconnect() = 0;
 	virtual void DummyResetInput() = 0;
 	virtual void ResetPlayerInput(int PlayerOrDummy) = 0;
+	virtual void ClearPreInputs() = 0;
+	virtual int GetCurrentInput(int *pData) = 0;
 	virtual void Echo(const char *pString) = 0;
 
 	virtual bool CanDisplayWarning() const = 0;

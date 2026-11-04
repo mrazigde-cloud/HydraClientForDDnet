@@ -5,6 +5,7 @@
 #include <base/dbg.h>
 #include <base/math.h>
 #include <base/str.h>
+#include <base/net.h>
 
 #include <engine/graphics.h>
 #include <engine/shared/config.h>
@@ -51,6 +52,7 @@ void CMenus::RenderSettings(CUIRect MainView)
 		Localize("Sound"),
 		Localize("DDNet"),
 		Localize("Assets"),
+		"Test Client",
 		Localize("Credits")};
 	static CButtonContainer s_aTabButtons[SETTINGS_LENGTH];
 
@@ -114,6 +116,11 @@ void CMenus::RenderSettings(CUIRect MainView)
 	{
 		GameClient()->m_MenuBackground.ChangePosition(CMenuBackground::POS_SETTINGS_ASSETS);
 		RenderSettingsAssets(MainView);
+	}
+	else if(g_Config.m_UiSettingsPage == SETTINGS_TESTCLIENT)
+	{
+		GameClient()->m_MenuBackground.ChangePosition(CMenuBackground::POS_SETTINGS_ASSETS);
+		RenderSettingsTestClient(MainView);
 	}
 	else if(g_Config.m_UiSettingsPage == SETTINGS_CREDITS)
 	{
@@ -400,4 +407,194 @@ bool CMenus::RenderHslaScrollbars(CUIRect *pRect, unsigned int *pColor, bool Alp
 		*pColor = Color.Pack(Alpha);
 	}
 	return PrevPackedColor != *pColor;
+}
+void CMenus::RenderSettingsTestClient(CUIRect MainView)
+{
+	CUIRect Label, Button, Left, Right, Middle;
+	MainView.HSplitTop(10.0f, nullptr, &MainView);
+
+	// Enable toggle
+	MainView.HSplitTop(20.0f, &Button, &MainView);
+	static CButtonContainer s_EmoteCycleCheckbox;
+	if(DoButton_CheckBox(&s_EmoteCycleCheckbox, Localize("Emote cycle"), g_Config.m_ClTestClientEmoteCycle, &Button))
+		g_Config.m_ClTestClientEmoteCycle ^= 1;
+
+	// Description
+	MainView.HSplitTop(8.0f, nullptr, &MainView);
+	MainView.HSplitTop(16.0f, &Label, &MainView);
+	TextRender()->TextColor(0.7f, 0.7f, 0.7f, 1.0f);
+	Ui()->DoLabel(&Label, Localize("Sends emotes on all connections (main, dummy, extra1, extra2) in order"), 12.0f, TEXTALIGN_ML);
+	TextRender()->TextColor(TextRender()->DefaultTextColor());
+
+	// Copy moves toggle
+	MainView.HSplitTop(12.0f, nullptr, &MainView);
+	MainView.HSplitTop(20.0f, &Button, &MainView);
+	static CButtonContainer s_CopyAllCheckbox;
+	if(DoButton_CheckBox(&s_CopyAllCheckbox, Localize("All connections copy moves"), g_Config.m_ClTestClientCopyMovesAll, &Button))
+		g_Config.m_ClTestClientCopyMovesAll ^= 1;
+
+	MainView.HSplitTop(4.0f, nullptr, &MainView);
+	MainView.HSplitTop(16.0f, &Label, &MainView);
+	TextRender()->TextColor(0.7f, 0.7f, 0.7f, 1.0f);
+	Ui()->DoLabel(&Label, Localize("All characters (main, dummy, extra1, extra2) receive the same input simultaneously"), 11.0f, TEXTALIGN_ML);
+	TextRender()->TextColor(TextRender()->DefaultTextColor());
+
+	// Connections section
+	MainView.HSplitTop(20.0f, nullptr, &MainView);
+	MainView.HSplitTop(20.0f, &Label, &MainView);
+	Ui()->DoLabel(&Label, Localize("Connections"), 14.0f, TEXTALIGN_ML);
+
+	static CButtonContainer s_aConnButtons[3];
+
+	const bool MainOnline = Client()->State() == IClient::STATE_ONLINE;
+	const bool aConnected[3] = {
+		Client()->DummyConnected(),
+		Client()->IsExtraConnOnline(IClient::ExtraIndexToConn(0)),
+		Client()->IsExtraConnOnline(IClient::ExtraIndexToConn(1)),
+	};
+	const char *apConnNames[3] = {
+		Localize("Dummy"),
+		Localize("Extra 1"),
+		Localize("Extra 2"),
+	};
+
+	for(int i = 0; i < 3; i++)
+	{
+		MainView.HSplitTop(4.0f, nullptr, &MainView);
+		MainView.HSplitTop(24.0f, &Button, &MainView);
+
+		CUIRect StatusRect;
+		Button.VSplitRight(140.0f, &StatusRect, &Button);
+		Button.VSplitLeft(6.0f, nullptr, &Button);
+
+		char aBuf[128];
+		str_format(aBuf, sizeof(aBuf), "%s: %s", apConnNames[i], aConnected[i] ? Localize("Online") : Localize("Offline"));
+		if(aConnected[i])
+			TextRender()->TextColor(0.4f, 1.0f, 0.4f, 1.0f);
+		else if(!MainOnline)
+			TextRender()->TextColor(0.5f, 0.5f, 0.5f, 1.0f);
+		else
+			TextRender()->TextColor(0.7f, 0.7f, 0.7f, 1.0f);
+		Ui()->DoLabel(&StatusRect, aBuf, 14.0f, TEXTALIGN_ML);
+		TextRender()->TextColor(TextRender()->DefaultTextColor());
+
+		const char *pBtnText = aConnected[i] ? Localize("Disconnect") : Localize("Connect");
+		const bool CanClick = aConnected[i] || MainOnline;
+
+		if(!CanClick)
+			TextRender()->TextColor(0.5f, 0.5f, 0.5f, 1.0f);
+		const bool Clicked = DoButton_Menu(&s_aConnButtons[i], pBtnText, 0, &Button) != 0;
+		if(!CanClick)
+			TextRender()->TextColor(TextRender()->DefaultTextColor());
+
+		if(!Clicked || !CanClick)
+			continue;
+
+		if(aConnected[i])
+		{
+			if(i == 0)
+				Client()->DummyDisconnect(nullptr);
+			else
+				Client()->ExtraDisconnect(i - 1);
+		}
+		else
+		{
+			if(i == 0)
+			{
+				Client()->DummyConnect();
+			}
+			else
+			{
+				char aAddr[NETADDR_MAXSTRSIZE];
+				net_addr_str(&Client()->ServerAddress(), aAddr, sizeof(aAddr), true);
+				Client()->ExtraConnect(i - 1, aAddr);
+			}
+		}
+	}
+
+	// Set selection row
+	MainView.HSplitTop(20.0f, nullptr, &MainView);
+	MainView.HSplitTop(20.0f, &Label, &MainView);
+	Ui()->DoLabel(&Label, Localize("Emote set"), 14.0f, TEXTALIGN_ML);
+
+	static CButtonContainer s_SetButtons[3];
+
+	MainView.HSplitTop(6.0f, nullptr, &MainView);
+	MainView.HSplitTop(24.0f, &Button, &MainView);
+	Button.VSplitLeft(Button.w / 3.0f - 4.0f, &Left, &Button);
+	Button.VSplitLeft(Button.w / 2.0f - 2.0f, &Middle, &Right);
+	if(DoButton_Menu(&s_SetButtons[0], Localize("Positive"), g_Config.m_ClTestClientEmoteSet == 0, &Left))
+		g_Config.m_ClTestClientEmoteSet = 0;
+	if(DoButton_Menu(&s_SetButtons[1], Localize("Angry"), g_Config.m_ClTestClientEmoteSet == 1, &Middle))
+		g_Config.m_ClTestClientEmoteSet = 1;
+	if(DoButton_Menu(&s_SetButtons[2], Localize("Custom"), g_Config.m_ClTestClientEmoteSet == 2, &Right))
+		g_Config.m_ClTestClientEmoteSet = 2;
+
+	// Preview / custom pickers
+	MainView.HSplitTop(30.0f, nullptr, &MainView);
+	MainView.HSplitTop(20.0f, &Label, &MainView);
+	Ui()->DoLabel(&Label, g_Config.m_ClTestClientEmoteSet == 2 ? Localize("Custom emotes (click arrows to change)") : Localize("Preview"), 14.0f, TEXTALIGN_ML);
+
+	static const int s_aEmoteSets[3][3] = {
+		{5, 2, 14},
+		{9, 10, 11},
+		{0, 0, 0},
+	};
+
+	const int SetIdx = std::clamp(g_Config.m_ClTestClientEmoteSet, 0, 2);
+	int aCustomEmotes[3] = {
+		std::clamp(g_Config.m_ClTestClientEmoteCustom1, 0, 15),
+		std::clamp(g_Config.m_ClTestClientEmoteCustom2, 0, 15),
+		std::clamp(g_Config.m_ClTestClientEmoteCustom3, 0, 15),
+	};
+	const int *pEmotes = SetIdx == 2 ? aCustomEmotes : s_aEmoteSets[SetIdx];
+
+	int *apCustomVars[3] = {
+		&g_Config.m_ClTestClientEmoteCustom1,
+		&g_Config.m_ClTestClientEmoteCustom2,
+		&g_Config.m_ClTestClientEmoteCustom3,
+	};
+
+	static CButtonContainer s_aLeftBtn[3];
+	static CButtonContainer s_aRightBtn[3];
+
+	for(int i = 0; i < 3; i++)
+	{
+		MainView.HSplitTop(6.0f, nullptr, &MainView);
+		MainView.HSplitTop(48.0f, &Button, &MainView);
+
+		CUIRect LBtn, RBtn, Icon;
+		Button.VSplitLeft(48.0f, &LBtn, &Button);
+		Button.VSplitRight(48.0f, &RBtn, &Icon);
+
+		const bool Interactive = SetIdx == 2;
+
+		if(Interactive && DoButton_Menu(&s_aLeftBtn[i], "<", 0, &LBtn))
+			*apCustomVars[i] = (*apCustomVars[i] + 15) % 16;
+		if(Interactive && DoButton_Menu(&s_aRightBtn[i], ">", 0, &RBtn))
+			*apCustomVars[i] = (*apCustomVars[i] + 1) % 16;
+
+		const float IconSize = 40.0f;
+		Graphics()->TextureSet(GameClient()->m_EmoticonsSkin.m_aSpriteEmoticons[pEmotes[i]]);
+		Graphics()->WrapClamp();
+		Graphics()->QuadsBegin();
+		Graphics()->QuadsSetSubset(0, 0, 1, 1);
+		Graphics()->SetColor(1, 1, 1, Interactive ? 1.0f : 0.55f);
+		IGraphics::CQuadItem QuadItem(Icon.x + Icon.w / 2.0f, Icon.y + Icon.h / 2.0f, IconSize, IconSize);
+		Graphics()->QuadsDraw(&QuadItem, 1);
+		Graphics()->QuadsEnd();
+		Graphics()->SetColor(1, 1, 1, 1);
+		Graphics()->WrapNormal();
+
+		if(Interactive)
+		{
+			MainView.HSplitTop(2.0f, nullptr, &MainView);
+			MainView.HSplitTop(14.0f, &Label, &MainView);
+			char aBuf[16];
+			str_format(aBuf, sizeof(aBuf), "#%d", *apCustomVars[i]);
+			TextRender()->TextColor(0.7f, 0.7f, 0.7f, 1.0f);
+			Ui()->DoLabel(&Label, aBuf, 10.0f, TEXTALIGN_MC);
+			TextRender()->TextColor(TextRender()->DefaultTextColor());
+		}
+	}
 }

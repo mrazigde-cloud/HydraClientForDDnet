@@ -94,19 +94,37 @@ int CGameClient::DDNetVersion() const { return DDNET_VERSION_NUMBER; }
 const char *CGameClient::DDNetVersionStr() const { return m_aDDNetVersionStr; }
 int CGameClient::ClientVersion7() const { return CLIENT_VERSION7; }
 const char *CGameClient::GetItemName(int Type) const { return m_NetObjHandler.GetObjName(Type); }
+bool CGameClient::IsExtraName(const char *pName) const
+{
+	if(pName == nullptr || pName[0] == '\0')
+		return false;
+	const char *pMe = Client()->PlayerName();
+	if(str_startswith(pName, "[E] "))
+		return str_comp(pName + 4, pMe) == 0;
+	if(str_startswith(pName, "[E2] "))
+		return str_comp(pName + 5, pMe) == 0;
+	return false;
+}
+
 int CGameClient::FindExtraClient() const
 {
-    if(!Client()->IsExtraActive())
-        return -1;
-    char aExtraName[MAX_NAME_LENGTH];
-    str_format(aExtraName, sizeof(aExtraName), "[E] %s", Client()->PlayerName());
-    for(int i = 0; i < MAX_CLIENTS; i++)
-    {
-        if(m_aClients[i].m_Active && str_comp(m_aClients[i].m_aName, aExtraName) == 0)
-            return i;
-    }
-    return -1;
+	const int Idx = Client()->GetActiveExtraIndex();
+	if(Idx < 0)
+		return -1;
+	const char *pMe = Client()->PlayerName();
+	const char *pPrefix = (Idx == 0) ? "[E] " : "[E2] ";
+	const int PrefixLen = str_length(pPrefix);
+	for(int i = 0; i < MAX_CLIENTS; i++)
+	{
+		if(!m_aClients[i].m_Active)
+			continue;
+		const char *pName = m_aClients[i].m_aName;
+		if(str_startswith(pName, pPrefix) && str_comp(pName + PrefixLen, pMe) == 0)
+			return i;
+	}
+	return -1;
 }
+
 int CGameClient::FindClientByConnectionId(const CUuid &ConnectionId) const
 {
 	for(int i = 0; i < MAX_CLIENTS; i++)
@@ -215,6 +233,8 @@ void CGameClient::OnConsoleInit()
 	Console()->Register("team", "i[team-id]", CFGFLAG_CLIENT, ConTeam, this, "Switch team");
 	Console()->Register("kill", "", CFGFLAG_CLIENT, ConKill, this, "Kill yourself to restart");
 	Console()->Register("ready_change", "", CFGFLAG_CLIENT, ConReadyChange7, this, "Change ready state (0.7 only)");
+	Console()->Register("emote_cycle", "", CFGFLAG_CLIENT, ConEmoteCycle, this, "Start emote cycle on all connections");
+	Console()->Register("emote_cycle_stop", "", CFGFLAG_CLIENT, ConEmoteCycleStop, this, "Stop emote cycle");
 
 	// register game commands to allow the client prediction to load settings from the map
 	Console()->Register("tune", "s[tuning] ?f[value]", CFGFLAG_GAME, ConTuneParam, this, "Tune variable to value");
@@ -517,6 +537,8 @@ void CGameClient::OnUpdate()
 		pComponent->OnUpdate();
 	}
 
+	UpdateEmoteCycle();
+
 	m_LocalServer.Update();
 }
 
@@ -541,7 +563,8 @@ void CGameClient::OnDummySwap()
 	}
 	const int PrevDummyFire = m_DummyInput.m_Fire;
 	m_DummyInput = m_Controls.m_aInputData[!g_Config.m_ClDummy];
-	m_Controls.m_aInputData[g_Config.m_ClDummy].m_Fire = PrevDummyFire;
+	m_DummyInput.m_Fire = 0;                                // fire не переносим — иначе dummy стреляет
+	m_Controls.m_aInputData[g_Config.m_ClDummy].m_Fire = PrevDummyFire & ~2;
 	m_IsDummySwapping = 1;
 }
 
@@ -2616,8 +2639,6 @@ void CGameClient::UpdateEditorIngameMoved()
 
 void CGameClient::ApplyPreInputs(int Tick, bool Direct, CGameWorld &GameWorld)
 {
-	char aExtraName[MAX_NAME_LENGTH];
-	str_format(aExtraName, sizeof(aExtraName), "[E] %s", Client()->PlayerName());
 
 	for(int ClientId = 0; ClientId < MAX_CLIENTS; ClientId++)
 	{
@@ -2631,13 +2652,31 @@ void CGameClient::ApplyPreInputs(int Tick, bool Direct, CGameWorld &GameWorld)
 		CNetObj_PlayerInput Input = {0};
 		bool HasInput = false;
 
-		const bool IsExtraChar = !Client()->IsExtraActive() && str_comp(m_aClients[ClientId].m_aName, aExtraName) == 0;
-		const bool IsMainChar = Client()->IsExtraActive() && str_comp(m_aClients[ClientId].m_aName, Client()->PlayerName()) == 0;
+		const bool IsAnyExtraName = IsExtraName(m_aClients[ClientId].m_aName);
+		const bool IsMainChar = !IsAnyExtraName && str_comp(m_aClients[ClientId].m_aName, Client()->PlayerName()) == 0;
+		const bool IsDummyChar = str_comp(m_aClients[ClientId].m_aName, Client()->DummyName()) == 0;
 
-		if(IsExtraChar || IsMainChar)
+		if(IsAnyExtraName || IsMainChar || IsDummyChar)
 		{
-			// Противоположный клиент получает нули из SendInput — стоит на месте.
-			// Prediction с нулями совпадает с реальностью → anti-ping плавный.
+			int SourceConn = -1;
+			if(g_Config.m_ClTestClientCopyMovesAll)
+			{
+				const char *pName = m_aClients[ClientId].m_aName;
+				if(str_startswith(pName, "[E] ") && str_comp(pName + 4, Client()->PlayerName()) == 0)
+					SourceConn = IClient::CONN_EXTRA1;
+				else if(str_startswith(pName, "[E2] ") && str_comp(pName + 5, Client()->PlayerName()) == 0)
+					SourceConn = IClient::CONN_EXTRA2;
+				else if(IsDummyChar)
+					SourceConn = IClient::CONN_DUMMY;
+				else
+					SourceConn = IClient::CONN_MAIN;
+			}
+
+			if(SourceConn >= 0)
+			{
+				if(const int *pData = Client()->GetInputForConn(SourceConn, Tick))
+					mem_copy(&Input, pData, sizeof(Input));
+			}
 			HasInput = true;
 		}
 		else if(g_Config.m_ClAntiPingPreInput)
@@ -2656,10 +2695,30 @@ void CGameClient::ApplyPreInputs(int Tick, bool Direct, CGameWorld &GameWorld)
 				Input.m_PrevWeapon = PreInput.m_PrevWeapon;
 				HasInput = true;
 			}
-			else if(Client()->IsExtraActive())
+			else
 			{
-				// FALLBACK: если preinput для X не дошёл, лучше заморозить, чем "лететь по инерции"
-				HasInput = true;
+				// Нет preinput для этого тика — используем ближайший БОЛЕЕ РАННИЙ preinput
+				// (максимум 5 тиков назад). Если и его нет — X тикается с последним
+				// известным input (инерция), а не замораживается.
+				for(int Dt = 1; Dt <= 5; Dt++)
+				{
+					const int PrevTick = Tick - Dt;
+					const CNetMsg_Sv_PreInput PrevPreInput = m_aClients[ClientId].m_aPreInputs[((PrevTick % 200) + 200) % 200];
+					if(PrevPreInput.m_IntendedTick == PrevTick)
+					{
+						Input.m_Direction = PrevPreInput.m_Direction;
+						Input.m_TargetX = PrevPreInput.m_TargetX;
+						Input.m_TargetY = PrevPreInput.m_TargetY;
+						Input.m_Jump = PrevPreInput.m_Jump;
+						Input.m_Fire = PrevPreInput.m_Fire;
+						Input.m_Hook = PrevPreInput.m_Hook;
+						Input.m_WantedWeapon = PrevPreInput.m_WantedWeapon;
+						Input.m_NextWeapon = PrevPreInput.m_NextWeapon;
+						Input.m_PrevWeapon = PrevPreInput.m_PrevWeapon;
+						HasInput = true;
+						break;
+					}
+				}
 			}
 		}
 
@@ -2713,7 +2772,7 @@ void CGameClient::OnPredict()
 	// don't predict inactive players, or entities from other teams
 	for(int i = 0; i < MAX_CLIENTS; i++)
 		if(CCharacter *pChar = m_PredictedWorld.GetCharacterById(i))
-			if((!m_Snap.m_aCharacters[i].m_Active && pChar->m_SnapTicks > 10) || IsOtherTeam(i))
+			if((!m_Snap.m_aCharacters[i].m_Active && pChar->m_SnapTicks > 10) || (IsOtherTeam(i) && !Client()->IsExtraActive()))
 				pChar->Destroy();
 
 	CProjectile *pProjNext = nullptr;
@@ -2851,14 +2910,12 @@ void CGameClient::OnPredict()
 		int PredTime = std::clamp(Client()->GetPredictionTime(), 0, 800);
 		float SmoothPace = 4 - 1.5f * PredTime / 800.f; // smoothing pace (a lower value will make the smoothing quicker)
 		int64_t Len = 1000 * PredTime * SmoothPace;
-
-		char aExtraName[MAX_NAME_LENGTH];
-		str_format(aExtraName, sizeof(aExtraName), "[E] %s", Client()->PlayerName());
 		for(int i = 0; i < MAX_CLIENTS; i++)
 		{
 			if(!m_Snap.m_aCharacters[i].m_Active || i == m_Snap.m_LocalClientId || !m_aLastActive[i])
 				continue;
-			if(str_comp(m_aClients[i].m_aName, aExtraName) == 0)
+			// В CopyAll extras двигаются предсказуемо — применяем smoothing как для обычных игроков
+			if(IsExtraName(m_aClients[i].m_aName) && !g_Config.m_ClTestClientCopyMovesAll)
 				continue;
 			vec2 NewPos = (m_PredictedTick == Client()->PredGameTick(g_Config.m_ClDummy)) ? m_aClients[i].m_Predicted.m_Pos : m_aClients[i].m_PrevPredicted.m_Pos;
 			vec2 PredErr = (m_aLastPos[i] - NewPos) / (float)std::min(Client()->GetPredictionTime(), 200);
@@ -3875,10 +3932,8 @@ void CGameClient::UpdateRenderedCharacters()
 
 		CCharacter *pChar = m_PredictedWorld.GetCharacterById(i);
 		const bool IsDummy = PredictDummy() && i == m_aLocalIds[!g_Config.m_ClDummy];
-		char aExtraName[MAX_NAME_LENGTH];
-		str_format(aExtraName, sizeof(aExtraName), "[E] %s", Client()->PlayerName());
-		const bool IsExtraChar = str_comp(m_aClients[i].m_aName, aExtraName) == 0;
 		const bool ExtraForced = Client()->IsExtraActive();
+		const bool IsExtraChar = !ExtraForced && IsExtraName(m_aClients[i].m_aName);
 		bool AntiPingPlayer = ExtraForced || (!IsExtraChar && (AntiPingPlayers() == 1 || (AntiPingPlayers() >= 2 && (IsDummy || (pChar && pChar->IsInterfering())))));
 		if(Predict() && (i == m_Snap.m_LocalClientId || (AntiPingPlayer && (ExtraForced || !IsOtherTeam(i)))) && pChar)
 		{
@@ -3915,6 +3970,69 @@ void CGameClient::UpdateRenderedCharacters()
 		m_aClients[i].m_RenderPos = Pos;
 		if(Predict() && i == m_Snap.m_LocalClientId)
 			m_LocalCharacterPos = Pos;
+	}
+
+	// CopyAll: все "свои" (dummy + extras) должны смотреть туда же, куда локальный.
+	// RenderTee использует m_TargetX/Y из DDNetCharacter extended data (не m_Angle),
+	// поэтому копируем их из снапшота локального.
+	if(g_Config.m_ClTestClientCopyMovesAll)
+	{
+		const int LocalId = m_Snap.m_LocalClientId;
+		if(LocalId >= 0 && LocalId < MAX_CLIENTS && m_Snap.m_aCharacters[LocalId].m_Active && m_Snap.m_aCharacters[LocalId].m_HasExtendedData)
+		{
+			const int TxCur = m_Snap.m_aCharacters[LocalId].m_ExtendedData.m_TargetX;
+			const int TyCur = m_Snap.m_aCharacters[LocalId].m_ExtendedData.m_TargetY;
+			const int AngCur = m_Snap.m_aCharacters[LocalId].m_Cur.m_Angle;
+			const int DirCur = m_Snap.m_aCharacters[LocalId].m_Cur.m_Direction;
+
+			int TxPrev = TxCur;
+			int TyPrev = TyCur;
+			int AngPrev = AngCur;
+			int DirPrev = DirCur;
+			if(m_Snap.m_aCharacters[LocalId].m_pPrevExtendedData)
+			{
+				TxPrev = m_Snap.m_aCharacters[LocalId].m_pPrevExtendedData->m_TargetX;
+				TyPrev = m_Snap.m_aCharacters[LocalId].m_pPrevExtendedData->m_TargetY;
+			}
+			if(m_Snap.m_aCharacters[LocalId].m_Active)
+			{
+				AngPrev = m_Snap.m_aCharacters[LocalId].m_Prev.m_Angle;
+				DirPrev = m_Snap.m_aCharacters[LocalId].m_Prev.m_Direction;
+			}
+
+			const char *pDummyName = Client()->DummyName();
+			for(int i = 0; i < MAX_CLIENTS; i++)
+			{
+				if(i == LocalId)
+					continue;
+				if(!m_Snap.m_aCharacters[i].m_Active)
+					continue;
+
+				const bool IsDummyChar = pDummyName[0] != '\0' && str_comp(m_aClients[i].m_aName, pDummyName) == 0;
+				const bool IsExtraChar = IsExtraName(m_aClients[i].m_aName);
+				if(!IsDummyChar && !IsExtraChar)
+					continue;
+
+				// Копируем в extended data — именно оттуда RenderTee берёт направление взгляда.
+				if(m_Snap.m_aCharacters[i].m_HasExtendedData)
+				{
+					m_Snap.m_aCharacters[i].m_ExtendedData.m_TargetX = TxCur;
+					m_Snap.m_aCharacters[i].m_ExtendedData.m_TargetY = TyCur;
+					if(m_Snap.m_aCharacters[i].m_pPrevExtendedData)
+					{
+						auto *pPrevExt = const_cast<CNetObj_DDNetCharacter *>(m_Snap.m_aCharacters[i].m_pPrevExtendedData);
+						pPrevExt->m_TargetX = TxPrev;
+						pPrevExt->m_TargetY = TyPrev;
+					}
+				}
+
+				// На случай если где-то используется m_Angle — тоже синхронизируем.
+				m_aClients[i].m_RenderCur.m_Angle = AngCur;
+				m_aClients[i].m_RenderCur.m_Direction = DirCur;
+				m_aClients[i].m_RenderPrev.m_Angle = AngPrev;
+				m_aClients[i].m_RenderPrev.m_Direction = DirPrev;
+			}
+		}
 	}
 }
 
@@ -4417,6 +4535,119 @@ void CGameClient::ResetPlayerInput(int PlayerOrDummy)
 {
 	m_Controls.ResetInput(PlayerOrDummy);
 	m_Controls.m_aInputData[PlayerOrDummy].m_Hook = 0;
+	m_Controls.m_aInputData[PlayerOrDummy].m_Fire = 0;
+	if(PlayerOrDummy == 1)
+		m_DummyInput.m_Fire = 0;
+}
+
+void CGameClient::ClearPreInputs()
+{
+	for(auto &Client : m_aClients)
+		for(auto &PreInput : Client.m_aPreInputs)
+			PreInput.m_IntendedTick = -1;
+}
+
+int CGameClient::GetCurrentInput(int *pData)
+{
+	// SnapInput читает клавиатуру/мышь и обновляет m_aInputData.
+	m_Controls.SnapInput(pData);
+	mem_copy(pData, &m_Controls.m_aInputData[g_Config.m_ClDummy], sizeof(CNetObj_PlayerInput));
+
+	// CopyAll: dummy рендерит угол из m_DummyInput (см. CPlayers::GetPlayerTargetAngle).
+	// В CopyAll режиме OnSnapInput(Dummy=1) не вызывается, поэтому обновляем вручную —
+	// иначе dummy не поворачивается, пока играешь на main/extra.
+	mem_copy(&m_DummyInput, &m_Controls.m_aInputData[g_Config.m_ClDummy], sizeof(CNetObj_PlayerInput));
+
+	return sizeof(CNetObj_PlayerInput);
+}
+
+void CGameClient::SendEmoteToConn(int Conn, int Emoticon)
+{
+	CNetMsg_Cl_Emoticon Msg;
+	Msg.m_Emoticon = Emoticon;
+	Client()->SendPackMsg(Conn, &Msg, MSGFLAG_VITAL);
+}
+
+void CGameClient::UpdateEmoteCycle()
+{
+	const bool Active = g_Config.m_ClTestClientEmoteCycle != 0;
+	if(!Active)
+	{
+		m_EmoteCycleWasActive = false;
+		return;
+	}
+	if(!m_EmoteCycleWasActive)
+	{
+		m_EmoteCycleBot = 0;
+		m_EmoteCycleEmote = 0;
+		m_EmoteCycleLastTick = -1;
+		m_EmoteCycleWasActive = true;
+	}
+
+	if(Client()->State() != IClient::STATE_ONLINE)
+		return;
+
+	const int CurTick = Client()->GameTick(0);
+	if(CurTick == m_EmoteCycleLastTick)
+		return;
+	m_EmoteCycleLastTick = CurTick;
+
+	static const int s_aEmoteSets[3][3] = {
+		{5, 2, 14},  // positive
+		{9, 10, 11}, // angry
+		{0, 0, 0},   // custom — заменяется ниже
+	};
+	const int SetIdx = std::clamp(g_Config.m_ClTestClientEmoteSet, 0, 2);
+	int aCustomEmotes[3];
+	const int *pEmotes = s_aEmoteSets[SetIdx];
+	if(SetIdx == 2)
+	{
+		aCustomEmotes[0] = std::clamp(g_Config.m_ClTestClientEmoteCustom1, 0, 15);
+		aCustomEmotes[1] = std::clamp(g_Config.m_ClTestClientEmoteCustom2, 0, 15);
+		aCustomEmotes[2] = std::clamp(g_Config.m_ClTestClientEmoteCustom3, 0, 15);
+		pEmotes = aCustomEmotes;
+	}
+
+	static const int s_aConns[] = {IClient::CONN_MAIN, IClient::CONN_DUMMY, IClient::CONN_EXTRA1, IClient::CONN_EXTRA2};
+	static const int NumConns = 4;
+	static const int NumEmotes = 3;
+
+	for(int Attempt = 0; Attempt < NumConns; Attempt++)
+	{
+		const int Conn = s_aConns[m_EmoteCycleBot];
+		const int CurEmote = m_EmoteCycleEmote;
+
+		m_EmoteCycleBot = (m_EmoteCycleBot + 1) % NumConns;
+		if(m_EmoteCycleBot == 0)
+			m_EmoteCycleEmote = (m_EmoteCycleEmote + 1) % NumEmotes;
+
+		bool Connected = false;
+		if(Conn == IClient::CONN_MAIN)
+			Connected = true;
+		else if(Conn == IClient::CONN_DUMMY)
+			Connected = Client()->DummyConnected();
+		else
+			Connected = Client()->IsExtraConnOnline(Conn);
+
+		if(Connected)
+		{
+			SendEmoteToConn(Conn, pEmotes[CurEmote]);
+			break;
+		}
+	}
+}
+void CGameClient::ConEmoteCycle(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameClient *pSelf = static_cast<CGameClient *>(pUserData);
+	g_Config.m_ClTestClientEmoteCycle = 1;
+	pSelf->m_Chat.Echo(Localize("Emote cycle started"));
+}
+
+void CGameClient::ConEmoteCycleStop(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameClient *pSelf = static_cast<CGameClient *>(pUserData);
+	g_Config.m_ClTestClientEmoteCycle = 0;
+	pSelf->m_Chat.Echo(Localize("Emote cycle stopped"));
 }
 
 void CGameClient::DummyResetInput()

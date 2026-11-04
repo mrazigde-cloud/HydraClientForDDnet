@@ -79,8 +79,9 @@ class CClient : public IClient, public CDemoPlayer::IListener
 
 	CNetClient m_aNetClient[NUM_CONNS];
 	int m_ActiveConn = CONN_MAIN;
-	int m_ExtraPredTick = 1;
-	int m_LastExtraSentTick = -1;
+	int m_aExtraPredTick[IClient::NUM_EXTRA_CONNS] = {1, 1};
+	int m_aLastExtraSentTick[IClient::NUM_EXTRA_CONNS] = {-1, -1};
+	int m_aSuppressFireTicks[NUM_CONNS] = {};
 	int m_SavedAntiPing = 1;
 	int m_SavedAntiPingPlayers = 1;
 	int m_SavedAntiPingGrenade = 1;
@@ -99,7 +100,7 @@ class CClient : public IClient, public CDemoPlayer::IListener
 	char m_aConnectAddressStr[MAX_SERVER_ADDRESSES * NETADDR_MAXSTRSIZE] = "";
 
 	CUuid m_ConnectionId = UUID_ZEROED;
-	CUuid m_ExtraConnectionId = UUID_ZEROED;
+	CUuid m_aExtraConnectionId[IClient::NUM_EXTRA_CONNS] = {};
 	bool m_Sixup;
 
 	bool m_HaveGlobalTcpAddr = false;
@@ -191,7 +192,7 @@ class CClient : public IClient, public CDemoPlayer::IListener
 	int m_aCurrentInput[NUM_CONNS] = {0, 0, 0, 0};
 	bool m_LastDummy = false;
 	bool m_DummySendConnInfo = false;
-	bool m_ExtraSendConnInfo = false;
+	bool m_aExtraSendConnInfo[IClient::NUM_EXTRA_CONNS] = {false, false};
 	bool m_DummyConnecting = false;
 	bool m_DummyConnected = false;
 	float m_LastDummyConnectTime = 0.0f;
@@ -210,13 +211,13 @@ class CClient : public IClient, public CDemoPlayer::IListener
 	CSnapshotStorage m_aSnapshotStorage[NUM_CONNS];
 	CSnapshotStorage::CHolder *m_aapSnapshots[NUM_CONNS][NUM_SNAPSHOT_TYPES];
 
-	CSnapshotStorage m_ExtraSnapshotStorage;
-	CSnapshotStorage::CHolder *m_aapExtraSnapshots[NUM_SNAPSHOT_TYPES] = {nullptr, nullptr};
-	int m_aExtraReceivedSnapshots = 0;
-	int m_aExtraCurrentRecvTick = 0;
-	char m_aaExtraSnapshotIncomingData[CSnapshot::MAX_SIZE] = {};
-	int m_aExtraSnapshotIncomingDataSize = 0;
-	uint64_t m_aExtraSnapshotParts = 0;
+	CSnapshotStorage m_aExtraSnapshotStorage[IClient::NUM_EXTRA_CONNS];
+	CSnapshotStorage::CHolder *m_aapExtraSnapshots[IClient::NUM_EXTRA_CONNS][NUM_SNAPSHOT_TYPES] = {};
+	int m_aExtraReceivedSnapshots[IClient::NUM_EXTRA_CONNS] = {0};
+	int m_aExtraCurrentRecvTick[IClient::NUM_EXTRA_CONNS] = {0};
+	char m_aaExtraSnapshotIncomingData[IClient::NUM_EXTRA_CONNS][CSnapshot::MAX_SIZE] = {};
+	int m_aExtraSnapshotIncomingDataSize[IClient::NUM_EXTRA_CONNS] = {0};
+	uint64_t m_aExtraSnapshotParts[IClient::NUM_EXTRA_CONNS] = {0};
 
 	bool IsExtraSnapshotActive() const;
 	const CSnapshotStorage::CHolder *GetActiveSnapshot(int SnapId) const;
@@ -323,7 +324,7 @@ public:
 	int SendMsgActive(CMsgPacker *pMsg, int Flags) override;
 	
 	void SendInfo(int Conn);
-	void SendExtraInfo();
+	void SendExtraInfo(int Conn);
 	void SendEnterGame(int Conn);
 	void SendReady(int Conn);
 	void SendMapRequest();
@@ -348,6 +349,7 @@ public:
 	int *GetInput(int Tick, int IsDummy) const override;
 	int *GetExtraInput(int Tick) const override;
 	int *GetMainInput(int Tick) const override;
+	int *GetInputForConn(int Conn, int Tick) const override;
 
 	const char *LatestVersion() const override;
 
@@ -364,8 +366,11 @@ public:
 	void Connect(const char *pAddress, const char *pPassword = nullptr) override;
 	void DisconnectWithReason(const char *pReason);
 	void Disconnect() override;
-	void ExtraConnect(const char *pAddress);
-	static void ConExtraConnect(IConsole::IResult *pResult, void *pUserData);
+	void ExtraConnect(int Index, const char *pAddress) override;
+	void ExtraDisconnect(int Index) override;
+	static void ConExtra1Connect(IConsole::IResult *pResult, void *pUserData);
+	static void ConExtra2Connect(IConsole::IResult *pResult, void *pUserData);
+	static void ConExtraDisconnect(IConsole::IResult *pResult, void *pUserData);
 	static void Con_ToggleExtra(IConsole::IResult *pResult, void *pUserData);
 	void DummyDisconnect(const char *pReason) override;
 	void DummyConnect() override;
@@ -426,8 +431,11 @@ public:
 	void LoadDDNetInfo();
 
 	bool IsSixup() const override { return m_Sixup; }
-	bool IsExtraActive() const override { return m_ActiveConn == CONN_EXTRA && g_Config.m_ClDummy == 0; }
+	bool IsExtraActive() const override { return IClient::IsExtraConn(m_ActiveConn) && g_Config.m_ClDummy == 0; }
 	int GetExtraClientId() const override { return GameClient()->FindExtraClient(); }
+	int GetActiveExtraIndex() const override { return ActiveExtraIndex(); }
+	bool IsExtraConnOnline(int Conn) override { return IClient::IsExtraConn(Conn) && m_aNetClient[Conn].State() == NETSTATE_ONLINE; }
+	int ActiveExtraIndex() const { return IClient::IsExtraConn(m_ActiveConn) ? IClient::ExtraConnToIndex(m_ActiveConn) : -1; }
 
 	const NETADDR &ServerAddress() const override { return *m_aNetClient[CONN_MAIN].ServerAddress(); }
 	int ConnectNetTypes() const override;
