@@ -125,6 +125,7 @@ public:
 		CONN_MAIN = 0,
 		CONN_DUMMY,
 		CONN_CONTACT,
+		CONN_EXTRA,
 		NUM_CONNS,
 	};
 
@@ -215,7 +216,9 @@ public:
 	// actions
 	virtual void Connect(const char *pAddress, const char *pPassword = nullptr) = 0;
 	virtual void Disconnect() = 0;
-
+	virtual void ExtraConnect(const char *pAddress) = 0;
+	virtual bool IsExtraActive() const = 0;
+	virtual int GetExtraClientId() const = 0;
 	// dummy
 	virtual void DummyDisconnect(const char *pReason) = 0;
 	virtual void DummyConnect() = 0;
@@ -257,6 +260,8 @@ public:
 	virtual int MapDownloadTotalsize() const = 0;
 
 	// input
+	virtual int *GetExtraInput(int Tick) const = 0;
+	virtual int *GetMainInput(int Tick) const = 0;
 	virtual int *GetInput(int Tick, int IsDummy = 0) const = 0;
 
 	// remote console
@@ -422,6 +427,7 @@ public:
 	virtual void OnDummySwap() = 0;
 	virtual void SendDummyInfo(bool Start) = 0;
 
+	virtual int FindExtraClient() const = 0;
 	virtual const char *GetItemName(int Type) const = 0;
 	virtual const char *Version() const = 0;
 	virtual const char *NetVersion() const = 0;
@@ -431,6 +437,7 @@ public:
 
 	virtual void OnDummyDisconnect() = 0;
 	virtual void DummyResetInput() = 0;
+	virtual void ResetPlayerInput(int PlayerOrDummy) = 0;
 	virtual void Echo(const char *pString) = 0;
 
 	virtual bool CanDisplayWarning() const = 0;

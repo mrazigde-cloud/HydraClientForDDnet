@@ -94,6 +94,28 @@ int CGameClient::DDNetVersion() const { return DDNET_VERSION_NUMBER; }
 const char *CGameClient::DDNetVersionStr() const { return m_aDDNetVersionStr; }
 int CGameClient::ClientVersion7() const { return CLIENT_VERSION7; }
 const char *CGameClient::GetItemName(int Type) const { return m_NetObjHandler.GetObjName(Type); }
+int CGameClient::FindExtraClient() const
+{
+    if(!Client()->IsExtraActive())
+        return -1;
+    char aExtraName[MAX_NAME_LENGTH];
+    str_format(aExtraName, sizeof(aExtraName), "[E] %s", Client()->PlayerName());
+    for(int i = 0; i < MAX_CLIENTS; i++)
+    {
+        if(m_aClients[i].m_Active && str_comp(m_aClients[i].m_aName, aExtraName) == 0)
+            return i;
+    }
+    return -1;
+}
+int CGameClient::FindClientByConnectionId(const CUuid &ConnectionId) const
+{
+	for(int i = 0; i < MAX_CLIENTS; i++)
+	{
+		if(m_aClients[i].m_Active && m_aClients[i].m_ConnectionId == ConnectionId)
+			return i;
+	}
+	return -1;
+}
 
 void CGameClient::OnConsoleInit()
 {
@@ -1137,6 +1159,21 @@ void CGameClient::OnMessage(int MsgId, CUnpacker *pUnpacker, int Conn, bool Dumm
 			{
 				m_Chat.OnMessage(MsgId, pRawMsg);
 			}
+		}
+		else if(MsgId == NETMSGTYPE_SV_EMOTICON)
+		{
+			// Эмоции должны обновляться и для dummy, иначе не рендерятся на его персонаже
+			CNetMsg_Sv_Emoticon *pMsg = (CNetMsg_Sv_Emoticon *)pRawMsg;
+			m_aClients[pMsg->m_ClientId].m_Emoticon = pMsg->m_Emoticon;
+			m_aClients[pMsg->m_ClientId].m_EmoticonStartTick = Client()->GameTick(g_Config.m_ClDummy);
+			m_aClients[pMsg->m_ClientId].m_EmoticonStartFraction = Client()->IntraGameTickSincePrev(g_Config.m_ClDummy);
+		}
+		else if(MsgId == NETMSGTYPE_SV_PREINPUT)
+		{
+			// Для extra preinput должен приходить с его собственного соединения,
+			// иначе тик разъезжается и prediction идёт по устаревшим позициям
+			CNetMsg_Sv_PreInput *pMsg = (CNetMsg_Sv_PreInput *)pRawMsg;
+			m_aClients[pMsg->m_Owner].m_aPreInputs[pMsg->m_IntendedTick % 200] = *pMsg;
 		}
 		return; // no need of all that stuff for the dummy
 	}
@@ -2579,41 +2616,60 @@ void CGameClient::UpdateEditorIngameMoved()
 
 void CGameClient::ApplyPreInputs(int Tick, bool Direct, CGameWorld &GameWorld)
 {
-	if(!g_Config.m_ClAntiPingPreInput)
-		return;
+	char aExtraName[MAX_NAME_LENGTH];
+	str_format(aExtraName, sizeof(aExtraName), "[E] %s", Client()->PlayerName());
 
 	for(int ClientId = 0; ClientId < MAX_CLIENTS; ClientId++)
 	{
-		if(CCharacter *pChar = GameWorld.GetCharacterById(ClientId))
+		CCharacter *pChar = GameWorld.GetCharacterById(ClientId);
+		if(!pChar)
+			continue;
+
+		if(ClientId == m_aLocalIds[0] || (Client()->DummyConnected() && ClientId == m_aLocalIds[1]))
+			continue;
+
+		CNetObj_PlayerInput Input = {0};
+		bool HasInput = false;
+
+		const bool IsExtraChar = !Client()->IsExtraActive() && str_comp(m_aClients[ClientId].m_aName, aExtraName) == 0;
+		const bool IsMainChar = Client()->IsExtraActive() && str_comp(m_aClients[ClientId].m_aName, Client()->PlayerName()) == 0;
+
+		if(IsExtraChar || IsMainChar)
 		{
-			if(ClientId == m_aLocalIds[0] || (Client()->DummyConnected() && ClientId == m_aLocalIds[1]))
-				continue;
-
+			// Противоположный клиент получает нули из SendInput — стоит на месте.
+			// Prediction с нулями совпадает с реальностью → anti-ping плавный.
+			HasInput = true;
+		}
+		else if(g_Config.m_ClAntiPingPreInput)
+		{
 			const CNetMsg_Sv_PreInput PreInput = m_aClients[ClientId].m_aPreInputs[Tick % 200];
-			if(PreInput.m_IntendedTick != Tick)
-				continue;
-
-			//convert preinput to input
-			CNetObj_PlayerInput Input = {0};
-			Input.m_Direction = PreInput.m_Direction;
-			Input.m_TargetX = PreInput.m_TargetX;
-			Input.m_TargetY = PreInput.m_TargetY;
-			Input.m_Jump = PreInput.m_Jump;
-			Input.m_Fire = PreInput.m_Fire;
-			Input.m_Hook = PreInput.m_Hook;
-			Input.m_WantedWeapon = PreInput.m_WantedWeapon;
-			Input.m_NextWeapon = PreInput.m_NextWeapon;
-			Input.m_PrevWeapon = PreInput.m_PrevWeapon;
-
-			if(Direct)
+			if(PreInput.m_IntendedTick == Tick)
 			{
-				pChar->OnDirectInput(&Input);
+				Input.m_Direction = PreInput.m_Direction;
+				Input.m_TargetX = PreInput.m_TargetX;
+				Input.m_TargetY = PreInput.m_TargetY;
+				Input.m_Jump = PreInput.m_Jump;
+				Input.m_Fire = PreInput.m_Fire;
+				Input.m_Hook = PreInput.m_Hook;
+				Input.m_WantedWeapon = PreInput.m_WantedWeapon;
+				Input.m_NextWeapon = PreInput.m_NextWeapon;
+				Input.m_PrevWeapon = PreInput.m_PrevWeapon;
+				HasInput = true;
 			}
-			else
+			else if(Client()->IsExtraActive())
 			{
-				pChar->OnPredictedInput(&Input);
+				// FALLBACK: если preinput для X не дошёл, лучше заморозить, чем "лететь по инерции"
+				HasInput = true;
 			}
 		}
+
+		if(!HasInput)
+			continue;
+
+		if(Direct)
+			pChar->OnDirectInput(&Input);
+		else
+			pChar->OnPredictedInput(&Input);
 	}
 }
 
@@ -2747,10 +2803,8 @@ void CGameClient::OnPredict()
 
 		for(int i = 0; i < MAX_CLIENTS; i++)
 			if(CCharacter *pChar = m_PredictedWorld.GetCharacterById(i))
-			{
-				m_aClients[i].m_aPredPos[Tick % 200] = pChar->Core()->m_Pos;
-				m_aClients[i].m_aPredTick[Tick % 200] = Tick;
-			}
+				if((!m_Snap.m_aCharacters[i].m_Active && pChar->m_SnapTicks > 10) || (IsOtherTeam(i) && !Client()->IsExtraActive()))
+					pChar->Destroy();
 
 		// check if we want to trigger effects
 		if(Tick > m_aLastNewPredictedTick[Dummy])
@@ -2798,9 +2852,13 @@ void CGameClient::OnPredict()
 		float SmoothPace = 4 - 1.5f * PredTime / 800.f; // smoothing pace (a lower value will make the smoothing quicker)
 		int64_t Len = 1000 * PredTime * SmoothPace;
 
+		char aExtraName[MAX_NAME_LENGTH];
+		str_format(aExtraName, sizeof(aExtraName), "[E] %s", Client()->PlayerName());
 		for(int i = 0; i < MAX_CLIENTS; i++)
 		{
 			if(!m_Snap.m_aCharacters[i].m_Active || i == m_Snap.m_LocalClientId || !m_aLastActive[i])
+				continue;
+			if(str_comp(m_aClients[i].m_aName, aExtraName) == 0)
 				continue;
 			vec2 NewPos = (m_PredictedTick == Client()->PredGameTick(g_Config.m_ClDummy)) ? m_aClients[i].m_Predicted.m_Pos : m_aClients[i].m_PrevPredicted.m_Pos;
 			vec2 PredErr = (m_aLastPos[i] - NewPos) / (float)std::min(Client()->GetPredictionTime(), 200);
@@ -3817,8 +3875,12 @@ void CGameClient::UpdateRenderedCharacters()
 
 		CCharacter *pChar = m_PredictedWorld.GetCharacterById(i);
 		const bool IsDummy = PredictDummy() && i == m_aLocalIds[!g_Config.m_ClDummy];
-		bool AntiPingPlayer = AntiPingPlayers() == 1 || (AntiPingPlayers() >= 2 && (IsDummy || (pChar && pChar->IsInterfering())));
-		if(Predict() && (i == m_Snap.m_LocalClientId || (AntiPingPlayer && !IsOtherTeam(i))) && pChar)
+		char aExtraName[MAX_NAME_LENGTH];
+		str_format(aExtraName, sizeof(aExtraName), "[E] %s", Client()->PlayerName());
+		const bool IsExtraChar = str_comp(m_aClients[i].m_aName, aExtraName) == 0;
+		const bool ExtraForced = Client()->IsExtraActive();
+		bool AntiPingPlayer = ExtraForced || (!IsExtraChar && (AntiPingPlayers() == 1 || (AntiPingPlayers() >= 2 && (IsDummy || (pChar && pChar->IsInterfering())))));
+		if(Predict() && (i == m_Snap.m_LocalClientId || (AntiPingPlayer && (ExtraForced || !IsOtherTeam(i)))) && pChar)
 		{
 			m_aClients[i].m_Predicted.Write(&m_aClients[i].m_RenderCur);
 			m_aClients[i].m_PrevPredicted.Write(&m_aClients[i].m_RenderPrev);
@@ -4349,6 +4411,12 @@ void CGameClient::ConchainMenuMap(IConsole::IResult *pResult, void *pUserData, I
 	{
 		pfnCallback(pResult, pCallbackUserData);
 	}
+}
+
+void CGameClient::ResetPlayerInput(int PlayerOrDummy)
+{
+	m_Controls.ResetInput(PlayerOrDummy);
+	m_Controls.m_aInputData[PlayerOrDummy].m_Hook = 0;
 }
 
 void CGameClient::DummyResetInput()

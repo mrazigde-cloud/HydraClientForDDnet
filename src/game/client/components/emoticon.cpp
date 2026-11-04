@@ -208,14 +208,10 @@ void CEmoticon::Emote(int Emoticon)
 {
 	CNetMsg_Cl_Emoticon Msg;
 	Msg.m_Emoticon = Emoticon;
-	Client()->SendPackMsgActive(&Msg, MSGFLAG_VITAL);
-
-	if(g_Config.m_ClDummyCopyMoves)
-	{
-		CMsgPacker MsgDummy(NETMSGTYPE_CL_EMOTICON, false);
-		MsgDummy.AddInt(Emoticon);
-		Client()->SendMsg(!g_Config.m_ClDummy, &MsgDummy, MSGFLAG_VITAL);
-	}
+	if(Client()->IsExtraActive())
+		Client()->SendPackMsg(IClient::CONN_EXTRA, &Msg, MSGFLAG_VITAL);
+	else
+		Client()->SendPackMsgActive(&Msg, MSGFLAG_VITAL);
 }
 
 void CEmoticon::EyeEmote(int Emote)

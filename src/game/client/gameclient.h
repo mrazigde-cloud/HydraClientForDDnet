@@ -511,6 +511,8 @@ public:
 		int m_FinishTimeSeconds;
 		int m_FinishTimeMillis;
 
+		CUuid m_ConnectionId = UUID_ZEROED;
+
 		// Editor allows 256 switches for now.
 		bool m_aSwitchStates[256];
 
@@ -654,6 +656,8 @@ public:
 	void RenderShutdownMessage() override;
 	void ProcessDemoSnapshot(CSnapshot *pSnap) override;
 
+	int FindExtraClient() const override;
+	int FindClientByConnectionId(const CUuid &ConnectionId) const;
 	const char *GetItemName(int Type) const override;
 	const char *Version() const override;
 	const char *NetVersion() const override;
@@ -723,6 +727,7 @@ public:
 	std::vector<SSwitchers> &PredSwitchers() { return m_PredictedWorld.m_Core.m_vSwitchers; }
 
 	void DummyResetInput() override;
+	void ResetPlayerInput(int PlayerOrDummy) override;
 	void Echo(const char *pString) override;
 	bool IsOtherTeam(int ClientId) const;
 	int SwitchStateTeam() const;

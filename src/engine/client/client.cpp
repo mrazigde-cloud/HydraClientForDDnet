@@ -111,8 +111,8 @@ CSnapshotDelta *CClient::SnapshotDelta()
 
 CClient::CClient() :
 	m_DemoPlayer(&m_SnapshotDelta, &m_SnapshotDeltaSixup, true, [&]() { UpdateDemoIntraTimers(); }),
-	m_aInputtimeMarginGraphs{{128, 2, true}, {128, 2, true}},
-	m_aGametimeMarginGraphs{{128, 2, true}, {128, 2, true}},
+	m_aInputtimeMarginGraphs{{128, 2, true}, {128, 2, true}, {128, 2, true}, {128, 2, true}},
+	m_aGametimeMarginGraphs{{128, 2, true}, {128, 2, true}, {128, 2, true}, {128, 2, true}},
 	m_FpsGraph(4096, 0, true)
 {
 	m_StateStartTime = time_get();
@@ -125,6 +125,7 @@ CClient::CClient() :
 	mem_zero(m_aapSnapshots, sizeof(m_aapSnapshots));
 	for(auto &SnapshotStorage : m_aSnapshotStorage)
 		SnapshotStorage.Init();
+	m_ExtraSnapshotStorage.Init();
 	mem_zero(m_aDemorecSnapshotHolders, sizeof(m_aDemorecSnapshotHolders));
 	m_CurrentServerInfo = {};
 	mem_zero(&m_Checksum, sizeof(m_Checksum));
@@ -234,13 +235,29 @@ int CClient::SendMsg(int Conn, CMsgPacker *pMsg, int Flags)
 
 int CClient::SendMsgActive(CMsgPacker *pMsg, int Flags)
 {
-	return SendMsg(g_Config.m_ClDummy, pMsg, Flags);
+	return SendMsg(IsExtraActive() ? CONN_EXTRA : g_Config.m_ClDummy, pMsg, Flags);
 }
+void CClient::SendExtraInfo()
+{
+	static char s_aExtraName[MAX_NAME_LENGTH];
+	str_format(s_aExtraName, sizeof(s_aExtraName), "[E] %s", PlayerName());
 
+	CNetMsg_Cl_StartInfo Msg;
+	Msg.m_pName = s_aExtraName;
+	Msg.m_pClan = g_Config.m_PlayerClan;
+	Msg.m_Country = g_Config.m_PlayerCountry;
+	Msg.m_pSkin = g_Config.m_ClPlayerSkin;
+	Msg.m_UseCustomColor = g_Config.m_ClPlayerUseCustomColor;
+	Msg.m_ColorBody = g_Config.m_ClPlayerColorBody;
+	Msg.m_ColorFeet = g_Config.m_ClPlayerColorFeet;
+	SendPackMsg(CONN_EXTRA, &Msg, MSGFLAG_VITAL);
+}
 void CClient::SendInfo(int Conn)
 {
+	CUuid ConnId = (Conn == CONN_EXTRA) ? m_ExtraConnectionId : m_ConnectionId;
+
 	CMsgPacker MsgVer(NETMSG_CLIENTVER, true);
-	MsgVer.AddRaw(&m_ConnectionId, sizeof(m_ConnectionId));
+	MsgVer.AddRaw(&ConnId, sizeof(ConnId));
 	MsgVer.AddInt(GameClient()->DDNetVersion());
 	MsgVer.AddString(GameClient()->DDNetVersionStr());
 	SendMsg(Conn, &MsgVer, MSGFLAG_VITAL);
@@ -349,73 +366,144 @@ bool CClient::ConnectionProblems() const
 
 void CClient::SendInput()
 {
+	// Если Extra не онлайн, но режим залип на EXTRA — вернуть MAIN и антипинг
+	if(m_ActiveConn == CONN_EXTRA && m_aNetClient[CONN_EXTRA].State() != NETSTATE_ONLINE)
+	{
+		m_ActiveConn = CONN_MAIN;
+		m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "client", "== Control: MAIN (auto-restore) ==");
+	}
 	int64_t Now = time_get();
 
 	if(m_aPredTick[g_Config.m_ClDummy] <= 0)
 		return;
 
+	const bool ExtraActive = (m_ActiveConn == CONN_EXTRA && m_aNetClient[CONN_EXTRA].State() == NETSTATE_ONLINE);
+
 	bool Force = false;
-	// fetch input
 	for(int Dummy = 0; Dummy < NUM_DUMMIES; Dummy++)
 	{
 		if(!DummyConnected() && Dummy != 0)
-		{
 			break;
-		}
-		int i = g_Config.m_ClDummy ^ Dummy;
-		int Size = GameClient()->OnSnapInput(m_aInputs[i][m_aCurrentInput[i]].m_aData, Dummy, Force);
 
-		if(Size)
+		int i = g_Config.m_ClDummy ^ Dummy;
+
+		int Size = 0;
+		if(ExtraActive && i == CONN_MAIN)
 		{
-			// pack input
+			Size = sizeof(CNetObj_PlayerInput);
+			mem_zero(m_aInputs[i][m_aCurrentInput[i]].m_aData, Size);
+		}
+		else
+		{
+			Size = GameClient()->OnSnapInput(m_aInputs[i][m_aCurrentInput[i]].m_aData, Dummy, Force);
+		}
+
+		if(Size > 0)
+		{
+			auto &Input = m_aInputs[i][m_aCurrentInput[i]];
+			if(ExtraActive && i == CONN_MAIN)
+			{
+				// Main в простое — тик растёт от main-ack, чтобы не отправлять extra-тики на main-сервер
+				Input.m_Tick = std::max(m_aAckGameTick[CONN_MAIN], 0) + 1;
+				Input.m_PredictedTime = (int64_t)Input.m_Tick * time_freq() / GameTickSpeed();
+			}
+			else
+			{
+				Input.m_Tick = m_aPredTick[g_Config.m_ClDummy];
+				Input.m_PredictedTime = m_PredictedTime.Get(Now);
+			}
+			Input.m_PredictionMargin = PredictionMargin() * time_freq() / 1000;
+			Input.m_Time = Now;
 			CMsgPacker Msg(NETMSG_INPUT, true);
 			Msg.AddInt(m_aAckGameTick[i]);
-			Msg.AddInt(m_aPredTick[g_Config.m_ClDummy]);
+			Msg.AddInt(Input.m_Tick);
 			Msg.AddInt(Size);
-
-			m_aInputs[i][m_aCurrentInput[i]].m_Tick = m_aPredTick[g_Config.m_ClDummy];
-			m_aInputs[i][m_aCurrentInput[i]].m_PredictedTime = m_PredictedTime.Get(Now);
-			m_aInputs[i][m_aCurrentInput[i]].m_PredictionMargin = PredictionMargin() * time_freq() / 1000;
-			m_aInputs[i][m_aCurrentInput[i]].m_Time = Now;
-
-			// pack it
 			for(int k = 0; k < Size / 4; k++)
-			{
-				static const int FlagsOffset = offsetof(CNetObj_PlayerInput, m_PlayerFlags) / sizeof(int);
-				if(k == FlagsOffset && IsSixup())
-				{
-					int PlayerFlags = m_aInputs[i][m_aCurrentInput[i]].m_aData[k];
-					Msg.AddInt(PlayerFlags_SixToSeven(PlayerFlags));
-				}
-				else
-				{
-					Msg.AddInt(m_aInputs[i][m_aCurrentInput[i]].m_aData[k]);
-				}
-			}
+				Msg.AddInt(Input.m_aData[k]);
 
 			m_aCurrentInput[i]++;
 			m_aCurrentInput[i] %= 200;
 
 			SendMsg(i, &Msg, MSGFLAG_FLUSH);
-			// ugly workaround for dummy. we need to send input with dummy to prevent
-			// prediction time resets. but if we do it too often, then it's
-			// impossible to use grenade with frozen dummy that gets hammered...
 			if(g_Config.m_ClDummyCopyMoves || m_aCurrentInput[i] % 2)
 				Force = true;
 		}
 	}
-}
 
+	if(m_aNetClient[CONN_EXTRA].State() == NETSTATE_ONLINE)
+	{
+		int Size = 0;
+		if(ExtraActive && !g_Config.m_ClDummy)
+		{
+			Size = GameClient()->OnSnapInput(m_aInputs[CONN_EXTRA][m_aCurrentInput[CONN_EXTRA]].m_aData, 0, true);
+		}
+		else
+		{
+			Size = sizeof(CNetObj_PlayerInput);
+			mem_zero(m_aInputs[CONN_EXTRA][m_aCurrentInput[CONN_EXTRA]].m_aData, Size);
+		}
+
+		if(Size > 0)
+		{
+			auto &Input = m_aInputs[CONN_EXTRA][m_aCurrentInput[CONN_EXTRA]];
+			Input.m_Tick = m_aPredTick[g_Config.m_ClDummy];
+			Input.m_PredictedTime = m_PredictedTime.Get(Now);
+			Input.m_PredictionMargin = PredictionMargin() * time_freq() / 1000;
+			Input.m_Time = Now;
+
+			CMsgPacker Msg(NETMSG_INPUT, true);
+			Msg.AddInt(m_aAckGameTick[CONN_EXTRA]);
+			Msg.AddInt(Input.m_Tick);
+			Msg.AddInt(Size);
+			for(int k = 0; k < Size / 4; k++)
+				Msg.AddInt(Input.m_aData[k]);
+
+			m_aCurrentInput[CONN_EXTRA]++;
+			m_aCurrentInput[CONN_EXTRA] %= 200;
+
+			SendMsg(CONN_EXTRA, &Msg, MSGFLAG_FLUSH);
+		}
+	}
+}
 const char *CClient::LatestVersion() const
 {
 	return m_aVersionStr;
 }
 
 // TODO: OPT: do this a lot smarter!
+
+int *CClient::GetExtraInput(int Tick) const
+{
+	int Best = -1;
+	for(int i = 0; i < 200; i++)
+	{
+		if(m_aInputs[CONN_EXTRA][i].m_Tick != -1 && m_aInputs[CONN_EXTRA][i].m_Tick <= Tick &&
+			(Best == -1 || m_aInputs[CONN_EXTRA][Best].m_Tick < m_aInputs[CONN_EXTRA][i].m_Tick))
+			Best = i;
+	}
+	if(Best != -1)
+		return (int *)m_aInputs[CONN_EXTRA][Best].m_aData;
+	return nullptr;
+}
+
+int *CClient::GetMainInput(int Tick) const
+{
+	int Best = -1;
+	for(int i = 0; i < 200; i++)
+	{
+		if(m_aInputs[CONN_MAIN][i].m_Tick != -1 && m_aInputs[CONN_MAIN][i].m_Tick <= Tick &&
+			(Best == -1 || m_aInputs[CONN_MAIN][Best].m_Tick < m_aInputs[CONN_MAIN][i].m_Tick))
+			Best = i;
+	}
+	if(Best != -1)
+		return (int *)m_aInputs[CONN_MAIN][Best].m_aData;
+	return nullptr;
+}
+
 int *CClient::GetInput(int Tick, int IsDummy) const
 {
 	int Best = -1;
-	const int d = IsDummy ^ g_Config.m_ClDummy;
+	const int d = (m_ActiveConn == CONN_EXTRA && !IsDummy && !g_Config.m_ClDummy) ? CONN_EXTRA : (IsDummy ^ g_Config.m_ClDummy);
 	for(int i = 0; i < 200; i++)
 	{
 		if(m_aInputs[d][i].m_Tick != -1 && m_aInputs[d][i].m_Tick <= Tick && (Best == -1 || m_aInputs[d][Best].m_Tick < m_aInputs[d][i].m_Tick))
@@ -619,117 +707,55 @@ void CClient::GenerateTimeoutCodes(const NETADDR *pAddrs, int NumAddrs)
 	}
 }
 
-void CClient::Connect(const char *pAddress, const char *pPassword)
+void CClient::ExtraConnect(const char *pAddress)
 {
-	// Disconnect will not change the state if we are already quitting/restarting
-	if(m_State == IClient::STATE_QUITTING || m_State == IClient::STATE_RESTARTING)
-		return;
-	Disconnect();
-	dbg_assert(m_State == IClient::STATE_OFFLINE, "Disconnect must ensure that client is offline");
+	char aBuf[256];
+	str_format(aBuf, sizeof(aBuf), "Attempting extra connection to: %s", pAddress);
+	m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "client", aBuf);
 
-	const NETADDR LastAddr = ServerAddress();
-
-	if(pAddress != m_aConnectAddressStr)
-		str_copy(m_aConnectAddressStr, pAddress);
-
-	char aMsg[512];
-	str_format(aMsg, sizeof(aMsg), "connecting to '%s'", m_aConnectAddressStr);
-	m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "client", aMsg, CLIENT_NETWORK_PRINT_COLOR);
-
-	int NumConnectAddrs = 0;
-	NETADDR aConnectAddrs[MAX_SERVER_ADDRESSES];
-	mem_zero(aConnectAddrs, sizeof(aConnectAddrs));
-	const char *pNextAddr = pAddress;
-	char aBuffer[128];
-	bool OnlySixup = true;
-	while((pNextAddr = str_next_token(pNextAddr, ",", aBuffer, sizeof(aBuffer))))
+	NETADDR Addr;
+	if(net_addr_from_str(&Addr, pAddress) != 0)
 	{
-		NETADDR NextAddr;
 		char aHost[128];
-		const int UrlParseResult = net_addr_from_url(&NextAddr, aBuffer, aHost, sizeof(aHost));
-		bool Sixup = NextAddr.type & NETTYPE_TW7;
-		if(UrlParseResult > 0)
-			str_copy(aHost, aBuffer);
-
-		if(net_host_lookup(aHost, &NextAddr, m_aNetClient[CONN_MAIN].NetType()) != 0)
+		str_copy(aHost, pAddress);
+		if(net_host_lookup(aHost, &Addr, m_aNetClient[CONN_EXTRA].NetType()) != 0)
 		{
-			log_error("client", "could not find address of %s", aHost);
-			continue;
+			m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "client", "Could not resolve address.");
+			return;
 		}
-		if(NumConnectAddrs == (int)std::size(aConnectAddrs))
-		{
-			log_warn("client", "too many connect addresses, ignoring %s", aHost);
-			continue;
-		}
-		if(NextAddr.port == 0)
-		{
-			NextAddr.port = 8303;
-		}
-		if(Sixup)
-			NextAddr.type |= NETTYPE_TW7;
-		else
-			OnlySixup = false;
-
-		char aNextAddr[NETADDR_MAXSTRSIZE];
-		net_addr_str(&NextAddr, aNextAddr, sizeof(aNextAddr), true);
-		log_debug("client", "resolved connect address '%s' to %s", aBuffer, aNextAddr);
-
-		if(NextAddr == LastAddr)
-		{
-			m_SendPassword = true;
-		}
-
-		aConnectAddrs[NumConnectAddrs] = NextAddr;
-		NumConnectAddrs += 1;
 	}
 
-	if(NumConnectAddrs == 0)
+	if(Addr.port == 0)
+		Addr.port = 8303;
+
+	if(m_aNetClient[CONN_EXTRA].State() != NETSTATE_OFFLINE)
 	{
-		log_error("client", "could not find any connect address");
-		char aWarning[256];
-		str_format(aWarning, sizeof(aWarning), Localize("Could not resolve connect address '%s'. See local console for details."), m_aConnectAddressStr);
-		SWarning Warning(Localize("Connect address error"), aWarning);
-		Warning.m_AutoHide = false;
-		AddWarning(Warning);
-		return;
+		m_aNetClient[CONN_EXTRA].Disconnect("reconnecting");
 	}
 
-	m_ConnectionId = RandomUuid();
-	ServerInfoRequest();
+	m_ExtraConnectionId = RandomUuid();
 
-	if(m_SendPassword)
-	{
-		str_copy(m_aPassword, g_Config.m_Password);
-		m_SendPassword = false;
-	}
-	else if(!pPassword)
-	{
-		m_aPassword[0] = 0;
-	}
-	else
-	{
-		str_copy(m_aPassword, pPassword);
-	}
+	for(int i = 0; i < 200; i++)
+		m_aInputs[CONN_EXTRA][i].m_Tick = -1;
+	m_aCurrentInput[CONN_EXTRA] = 0;
+	m_ExtraPredTick = 1;
+	m_aExtraCurrentRecvTick = 0;
+	m_aExtraReceivedSnapshots = 0;
+	m_LastExtraSentTick = -1;
+	m_aExtraSnapshotParts = 0;
+	m_aExtraSnapshotIncomingDataSize = 0;
+	m_aAckGameTick[CONN_EXTRA] = -1;
+	m_aDidPostConnect[CONN_EXTRA] = false;
+	m_aapExtraSnapshots[SNAP_CURRENT] = nullptr;
+	m_aapExtraSnapshots[SNAP_PREV] = nullptr;
+	m_aapSnapshots[CONN_EXTRA][SNAP_CURRENT] = nullptr;
+	m_aapSnapshots[CONN_EXTRA][SNAP_PREV] = nullptr;
+	m_ExtraSnapshotStorage.PurgeAll();
 
-	m_CanReceiveServerCapabilities = true;
-
-	m_Sixup = OnlySixup;
-	if(m_Sixup)
-	{
-		m_aNetClient[CONN_MAIN].Connect7(aConnectAddrs, NumConnectAddrs);
-	}
-	else
-	{
-		m_aNetClient[CONN_MAIN].Connect(aConnectAddrs, NumConnectAddrs);
-	}
-
-	m_aNetClient[CONN_MAIN].RefreshStun();
-	SetState(IClient::STATE_CONNECTING);
-
-	m_aInputtimeMarginGraphs[CONN_MAIN].Init(-150.0f, 150.0f);
-	m_aGametimeMarginGraphs[CONN_MAIN].Init(-150.0f, 150.0f);
-
-	GenerateTimeoutCodes(aConnectAddrs, NumConnectAddrs);
+	m_aNetClient[CONN_EXTRA].Connect(&Addr, 1);
+	m_ExtraSendConnInfo = true;
+	
+	m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "client", "Extra connection initiated.");
 }
 
 void CClient::DisconnectWithReason(const char *pReason)
@@ -738,6 +764,26 @@ void CClient::DisconnectWithReason(const char *pReason)
 		pReason = nullptr;
 
 	DummyDisconnect(pReason);
+
+	// Отключаем extra тоже
+	if(m_aNetClient[CONN_EXTRA].State() != NETSTATE_OFFLINE)
+	{
+		m_aNetClient[CONN_EXTRA].Disconnect(pReason);
+	}
+	m_ActiveConn = CONN_MAIN;
+	m_ExtraSendConnInfo = false;
+	m_ExtraPredTick = 1;
+	m_aExtraReceivedSnapshots = 0;
+	m_aExtraCurrentRecvTick = 0;
+	m_aapExtraSnapshots[SNAP_CURRENT] = nullptr;
+	m_aapExtraSnapshots[SNAP_PREV] = nullptr;
+	m_aapSnapshots[CONN_EXTRA][SNAP_CURRENT] = nullptr;
+	m_aapSnapshots[CONN_EXTRA][SNAP_PREV] = nullptr;
+	m_aExtraSnapshotParts = 0;
+	m_aExtraSnapshotIncomingDataSize = 0;
+	m_LastExtraSentTick = -1;
+	m_ExtraSnapshotStorage.PurgeAll();
+	m_PredictedTime.Init(0);
 
 	char aBuf[512];
 	str_format(aBuf, sizeof(aBuf), "disconnecting. reason='%s'", pReason ? pReason : "unknown");
@@ -782,6 +828,12 @@ void CClient::DisconnectWithReason(const char *pReason)
 	// clear snapshots
 	m_aapSnapshots[0][SNAP_CURRENT] = nullptr;
 	m_aapSnapshots[0][SNAP_PREV] = nullptr;
+	m_aapExtraSnapshots[SNAP_CURRENT] = nullptr;
+	m_aapExtraSnapshots[SNAP_PREV] = nullptr;
+	m_ExtraSnapshotStorage.PurgeAll();
+	m_aExtraReceivedSnapshots = 0;
+	m_aExtraSnapshotParts = 0;
+	m_aExtraSnapshotIncomingDataSize = 0;
 	m_aReceivedSnapshots[0] = 0;
 	m_LastDummy = false;
 
@@ -913,10 +965,25 @@ void CClient::LoadDebugFont()
 
 // ---
 
+bool CClient::IsExtraSnapshotActive() const
+{
+	return m_ActiveConn == CONN_EXTRA && g_Config.m_ClDummy == 0 && m_aapExtraSnapshots[SNAP_CURRENT] != nullptr;
+}
+
+const CSnapshotStorage::CHolder *CClient::GetActiveSnapshot(int SnapId) const
+{
+	if(IsExtraSnapshotActive() && m_aapExtraSnapshots[SnapId])
+		return m_aapExtraSnapshots[SnapId];
+	return m_aapSnapshots[g_Config.m_ClDummy][SnapId];
+}
+
 IClient::CSnapItem CClient::SnapGetItem(int SnapId, int Index) const
 {
 	dbg_assert(SnapId >= 0 && SnapId < NUM_SNAPSHOT_TYPES, "invalid SnapId");
-	const CSnapshot *pSnapshot = m_aapSnapshots[g_Config.m_ClDummy][SnapId]->m_pAltSnap;
+	const auto *pActive = GetActiveSnapshot(SnapId);
+	if(!pActive)
+		return {};
+	const CSnapshot *pSnapshot = pActive->m_pAltSnap;
 	const CSnapshotItem *pSnapshotItem = pSnapshot->GetItem(Index);
 	CSnapItem Item;
 	Item.m_Type = pSnapshot->GetItemType(Index);
@@ -928,18 +995,19 @@ IClient::CSnapItem CClient::SnapGetItem(int SnapId, int Index) const
 
 const void *CClient::SnapFindItem(int SnapId, int Type, int Id) const
 {
-	if(!m_aapSnapshots[g_Config.m_ClDummy][SnapId])
+	const auto *pActive = GetActiveSnapshot(SnapId);
+	if(!pActive)
 		return nullptr;
-
-	return m_aapSnapshots[g_Config.m_ClDummy][SnapId]->m_pAltSnap->FindItem(Type, Id);
+	return pActive->m_pAltSnap->FindItem(Type, Id);
 }
 
 int CClient::SnapNumItems(int SnapId) const
 {
 	dbg_assert(SnapId >= 0 && SnapId < NUM_SNAPSHOT_TYPES, "invalid SnapId");
-	if(!m_aapSnapshots[g_Config.m_ClDummy][SnapId])
+	const auto *pActive = GetActiveSnapshot(SnapId);
+	if(!pActive)
 		return 0;
-	return m_aapSnapshots[g_Config.m_ClDummy][SnapId]->m_pAltSnap->NumItems();
+	return pActive->m_pAltSnap->NumItems();
 }
 
 void CClient::SnapSetStaticsize(int ItemType, int Size)
@@ -1761,11 +1829,17 @@ void CClient::ProcessServerPacket(CNetChunk *pPacket, int Conn, bool Dummy)
 				pMapUrl = MapDetails->m_aUrl[0] ? MapDetails->m_aUrl : nullptr;
 			}
 
-			if(LoadMapSearch(pMap, MapSha256, MapCrc) == nullptr)
+			if(Conn == CONN_EXTRA && GameClient()->Map()->IsLoaded())
+			{
+				// Карта уже загружена через main, не перезагружаем
+				m_pConsole->Print(IConsole::OUTPUT_LEVEL_ADDINFO, "client/network", "map already loaded, sending ready");
+				SendReady(Conn);
+			}
+			else if(LoadMapSearch(pMap, MapSha256, MapCrc) == nullptr)
 			{
 				m_pConsole->Print(IConsole::OUTPUT_LEVEL_ADDINFO, "client/network", "loading done");
 				SetLoadingStateDetail(IClient::ELoadingStateDetail::SENDING_READY);
-				SendReady(CONN_MAIN);
+				SendReady(Conn);
 			}
 			else
 			{
@@ -1893,6 +1967,12 @@ void CClient::ProcessServerPacket(CNetChunk *pPacket, int Conn, bool Dummy)
 				m_DummyDeactivateOnReconnect = false;
 			}
 		}
+		else if(Conn == CONN_EXTRA && Msg == NETMSG_CON_READY)
+		{
+			m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "client", "Extra connection ready.");
+			SendEnterGame(CONN_EXTRA);
+			m_aDidPostConnect[CONN_EXTRA] = false;
+		}
 		else if(Conn == CONN_MAIN && (pPacket->m_Flags & NET_CHUNKFLAG_VITAL) != 0 && Msg == NETMSG_CON_READY)
 		{
 			if(!GameClient()->Map()->IsLoaded())
@@ -1980,42 +2060,18 @@ void CClient::ProcessServerPacket(CNetChunk *pPacket, int Conn, bool Dummy)
 			{
 				Connect(m_aConnectAddressStr);
 			}
-			else
+			else if(Conn == CONN_DUMMY) // Явно проверяем, что это дамми
 			{
 				DummyDisconnect("reconnect");
 				// Reset dummy connect time to allow immediate reconnect
 				m_LastDummyConnectTime = 0.0f;
 				DummyConnect();
 			}
-		}
-		else if(Msg == NETMSG_REDIRECT)
-		{
-			int RedirectPort = Unpacker.GetInt();
-			if(Unpacker.Error())
+			else if(Conn == CONN_EXTRA) // Наш новый слот
 			{
-				return;
-			}
-			if(Conn == CONN_MAIN)
-			{
-				NETADDR ServerAddr = ServerAddress();
-				ServerAddr.port = RedirectPort;
-				char aAddr[NETADDR_MAXSTRSIZE];
-				net_addr_str(&ServerAddr, aAddr, sizeof(aAddr), true);
-				Connect(aAddr);
-			}
-			else
-			{
-				DummyDisconnect("redirect");
-				if(ServerAddress().port != RedirectPort)
-				{
-					// Only allow redirecting to the same port to reconnect. The dummy
-					// should not be connected to a different server than the main, as
-					// the client assumes that main and dummy use the same map.
-					return;
-				}
-				// Reset dummy connect time to allow immediate reconnect
-				m_LastDummyConnectTime = 0.0f;
-				DummyConnect();
+				// Пока что просто игнорируем запрос на переподключение для Extra-слота.
+				// Позже мы научим его переподключаться правильно.
+				dbg_msg("client", "Received NETMSG_RECONNECT for CONN_EXTRA. Ignoring for now.");
 			}
 		}
 		else if(Conn == CONN_MAIN && (pPacket->m_Flags & NET_CHUNKFLAG_VITAL) != 0 && Msg == NETMSG_RCON_CMD_ADD)
@@ -2083,6 +2139,16 @@ void CClient::ProcessServerPacket(CNetChunk *pPacket, int Conn, bool Dummy)
 		}
 		else if(Msg == NETMSG_INPUTTIMING)
 		{
+			if(g_Config.m_ClDummy != 0)
+			{
+				if(Conn != CONN_DUMMY)
+					return;
+			}
+			else if(Conn != CONN_DUMMY && Conn != m_ActiveConn)
+			{
+				return;
+			}
+
 			int InputPredTick = Unpacker.GetInt();
 			int TimeLeft = Unpacker.GetInt();
 			if(Unpacker.Error())
@@ -2109,6 +2175,117 @@ void CClient::ProcessServerPacket(CNetChunk *pPacket, int Conn, bool Dummy)
 		}
 		else if(Msg == NETMSG_SNAP || Msg == NETMSG_SNAPSINGLE || Msg == NETMSG_SNAPEMPTY)
 		{
+			if(Conn == CONN_EXTRA)
+			{
+				int GameTick = Unpacker.GetInt();
+				int DeltaTick = GameTick - Unpacker.GetInt();
+				int NumParts = 1;
+				int Part = 0;
+				if(Msg == NETMSG_SNAP)
+				{
+					NumParts = Unpacker.GetInt();
+					Part = Unpacker.GetInt();
+				}
+				unsigned int Crc = 0;
+				int PartSize = 0;
+				if(Msg != NETMSG_SNAPEMPTY)
+				{
+					Crc = Unpacker.GetInt();
+					PartSize = Unpacker.GetInt();
+				}
+				const char *pData = (const char *)Unpacker.GetRaw(PartSize);
+				if(Unpacker.Error() || NumParts < 1 || NumParts > CSnapshot::MAX_PARTS || Part < 0 || Part >= NumParts || PartSize < 0 || PartSize > MAX_SNAPSHOT_PACKSIZE)
+					return;
+
+				if(GameTick >= m_aExtraCurrentRecvTick && GameTick > m_aAckGameTick[CONN_EXTRA])
+				{
+					if(GameTick != m_aExtraCurrentRecvTick)
+					{
+						m_aExtraSnapshotParts = 0;
+						m_aExtraCurrentRecvTick = GameTick;
+						m_aExtraSnapshotIncomingDataSize = 0;
+					}
+					mem_copy(m_aaExtraSnapshotIncomingData + Part * MAX_SNAPSHOT_PACKSIZE, pData, std::clamp(PartSize, 0, (int)sizeof(m_aaExtraSnapshotIncomingData) - Part * MAX_SNAPSHOT_PACKSIZE));
+					m_aExtraSnapshotParts |= (uint64_t)(1) << Part;
+
+					if(Part == NumParts - 1)
+						m_aExtraSnapshotIncomingDataSize = (NumParts - 1) * MAX_SNAPSHOT_PACKSIZE + PartSize;
+
+					if((NumParts < CSnapshot::MAX_PARTS && m_aExtraSnapshotParts == (((uint64_t)(1) << NumParts) - 1)) ||
+						(NumParts == CSnapshot::MAX_PARTS && m_aExtraSnapshotParts == std::numeric_limits<uint64_t>::max()))
+					{
+						CSnapshotDeltaBuffer TmpBuffer2;
+						CSnapshotBuffer TmpBuffer3;
+						m_aExtraSnapshotParts = 0;
+
+						const CSnapshot *pDeltaShot = CSnapshot::EmptySnapshot();
+						if(DeltaTick >= 0)
+						{
+							int DeltashotSize = m_ExtraSnapshotStorage.Get(DeltaTick, nullptr, &pDeltaShot, nullptr);
+							if(DeltashotSize < 0)
+							{
+								m_aAckGameTick[CONN_EXTRA] = -1;
+								return;
+							}
+						}
+
+						const void *pDeltaData = SnapshotDelta()->EmptyDelta();
+						int DeltaSize = sizeof(int) * 3;
+						if(m_aExtraSnapshotIncomingDataSize)
+						{
+							int IntSize = CVariableInt::Decompress(m_aaExtraSnapshotIncomingData, m_aExtraSnapshotIncomingDataSize, TmpBuffer2.m_aData, sizeof(TmpBuffer2.m_aData));
+							if(IntSize < 0)
+								return;
+							pDeltaData = TmpBuffer2.m_aData;
+							DeltaSize = IntSize;
+						}
+
+						const int SnapSize = SnapshotDelta()->UnpackDelta(pDeltaShot, &TmpBuffer3, pDeltaData, DeltaSize);
+						if(SnapSize < 0 || !TmpBuffer3.AsSnapshot()->IsValid(SnapSize))
+							return;
+						if(Msg != NETMSG_SNAPEMPTY && TmpBuffer3.AsSnapshot()->Crc() != Crc)
+							return;
+
+						CSnapshotBuffer AltSnapBuffer;
+						int AltSnapSize = UnpackAndValidateSnapshot(TmpBuffer3.AsSnapshot(), &AltSnapBuffer);
+						if(AltSnapSize < 0)
+							return;
+
+						m_ExtraSnapshotStorage.Add(GameTick, time_get(), SnapSize, TmpBuffer3.AsSnapshot(), AltSnapSize, AltSnapBuffer.AsSnapshot());
+
+						if(m_ActiveConn == CONN_EXTRA)
+						{
+							const bool FirstSnapshot = m_aExtraReceivedSnapshots == 0;
+							if(FirstSnapshot)
+							{
+								m_aapExtraSnapshots[SNAP_PREV] = m_ExtraSnapshotStorage.m_pFirst;
+								m_aapExtraSnapshots[SNAP_CURRENT] = m_ExtraSnapshotStorage.m_pLast;
+								m_aapSnapshots[CONN_EXTRA][SNAP_PREV] = m_aapExtraSnapshots[SNAP_PREV];
+								m_aapSnapshots[CONN_EXTRA][SNAP_CURRENT] = m_aapExtraSnapshots[SNAP_CURRENT];
+
+								m_aCurGameTick[g_Config.m_ClDummy] = m_aapExtraSnapshots[SNAP_CURRENT]->m_Tick;
+								m_aPrevGameTick[g_Config.m_ClDummy] = m_aapExtraSnapshots[SNAP_PREV]->m_Tick;
+								m_PredictedTime.Init(m_aCurGameTick[g_Config.m_ClDummy] * time_freq() / GameTickSpeed());
+								m_PredictedTime.SetAdjustSpeed(CSmoothTime::ADJUSTDIRECTION_UP, 1000.0f);
+								m_PredictedTime.UpdateMargin(PredictionMargin() * time_freq() / 1000);
+								m_aGameTime[g_Config.m_ClDummy].Init((m_aCurGameTick[g_Config.m_ClDummy] - 1) * time_freq() / GameTickSpeed());
+								m_aPredTick[g_Config.m_ClDummy] = m_aCurGameTick[g_Config.m_ClDummy] + 1;
+								m_LastExtraSentTick = -1;
+
+								GameClient()->OnNewSnapshot(false);
+							}
+							m_aExtraReceivedSnapshots++;
+						}
+
+						if(GameTick > m_aAckGameTick[CONN_EXTRA])
+							m_aAckGameTick[CONN_EXTRA] = GameTick;
+						if(m_ExtraPredTick < GameTick + 1)
+							m_ExtraPredTick = GameTick + 1;
+					}
+				}
+				return;
+			}
+			// ... существующий код для CONN_MAIN/CONN_DUMMY
 			// We are not allowed to process snapshots yet.
 			if(State() < IClient::STATE_LOADING ||
 				!GameClient()->Map()->IsLoaded())
@@ -2303,17 +2480,21 @@ void CClient::ProcessServerPacket(CNetChunk *pPacket, int Conn, bool Dummy)
 					// apply snapshot, cycle pointers
 					m_aReceivedSnapshots[Conn]++;
 
+					// Main clock не трогаем пока extra активен, иначе m_aGameTime[0] дерутся
+					const bool SkipMainClock = (Conn == CONN_MAIN && m_ActiveConn == CONN_EXTRA);
+
 					// we got two snapshots until we see us self as connected
 					if(m_aReceivedSnapshots[Conn] == 2)
 					{
 						// start at 200ms and work from there
-						if(!Dummy)
+						if(!Dummy && !SkipMainClock)
 						{
 							m_PredictedTime.Init(GameTick * time_freq() / GameTickSpeed());
 							m_PredictedTime.SetAdjustSpeed(CSmoothTime::ADJUSTDIRECTION_UP, 1000.0f);
 							m_PredictedTime.UpdateMargin(PredictionMargin() * time_freq() / 1000);
 						}
-						m_aGameTime[Conn].Init((GameTick - 1) * time_freq() / GameTickSpeed());
+						if(!SkipMainClock)
+							m_aGameTime[Conn].Init((GameTick - 1) * time_freq() / GameTickSpeed());
 						m_aapSnapshots[Conn][SNAP_PREV] = m_aSnapshotStorage[Conn].m_pFirst;
 						m_aapSnapshots[Conn][SNAP_CURRENT] = m_aSnapshotStorage[Conn].m_pLast;
 						m_aPrevGameTick[Conn] = m_aapSnapshots[Conn][SNAP_PREV]->m_Tick;
@@ -2339,8 +2520,8 @@ void CClient::ProcessServerPacket(CNetChunk *pPacket, int Conn, bool Dummy)
 						}
 					}
 
-					// adjust game time
-					if(m_aReceivedSnapshots[Conn] > 2)
+					// adjust game time (skip main when extra is active)
+					if(m_aReceivedSnapshots[Conn] > 2 && !SkipMainClock)
 					{
 						int64_t Now = m_aGameTime[Conn].Get(time_get());
 						int64_t TickStart = GameTick * time_freq() / GameTickSpeed();
@@ -2426,7 +2607,8 @@ void CClient::ProcessServerPacket(CNetChunk *pPacket, int Conn, bool Dummy)
 			}
 		}
 
-		GameClient()->OnMessage(Msg, &Unpacker, Conn, Dummy);
+		if(Conn != CONN_EXTRA || Msg == NETMSGTYPE_SV_PREINPUT)
+			GameClient()->OnMessage(Msg, &Unpacker, Conn, Dummy);
 	}
 }
 
@@ -2706,6 +2888,18 @@ void CClient::PumpNetwork()
 					GameClient()->Echo(aBuf);
 				}
 			}
+			if(m_aNetClient[CONN_EXTRA].State() == NETSTATE_OFFLINE && (m_aapExtraSnapshots[SNAP_CURRENT] || m_ActiveConn == CONN_EXTRA))
+			{
+				m_ActiveConn = CONN_MAIN;
+				m_aExtraReceivedSnapshots = 0;
+				m_aapExtraSnapshots[SNAP_CURRENT] = nullptr;
+				m_aapExtraSnapshots[SNAP_PREV] = nullptr;
+				m_aapSnapshots[CONN_EXTRA][SNAP_CURRENT] = nullptr;
+				m_aapSnapshots[CONN_EXTRA][SNAP_PREV] = nullptr;
+				m_ExtraPredTick = 1;
+				m_LastExtraSentTick = -1;
+				m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "client", "== Control: MAIN (Extra lost) ==");
+			}
 		}
 
 		// check if main was connected
@@ -2728,6 +2922,24 @@ void CClient::PumpNetwork()
 			GameClient()->SendDummyInfo(true);
 			SendEnterGame(CONN_DUMMY);
 		}
+		if(m_ActiveConn == CONN_EXTRA && m_aNetClient[CONN_EXTRA].State() == NETSTATE_OFFLINE)
+		{
+			m_ActiveConn = CONN_MAIN;
+			g_Config.m_ClAntiPing = m_SavedAntiPing;
+			g_Config.m_ClAntiPingPlayers = m_SavedAntiPingPlayers;
+			g_Config.m_ClAntiPingGrenade = m_SavedAntiPingGrenade;
+			g_Config.m_ClAntiPingWeapons = m_SavedAntiPingWeapons;
+			m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "client", "== Control: MAIN (Extra lost) ==");
+		}
+		if(m_ExtraSendConnInfo && m_aNetClient[CONN_EXTRA].State() == NETSTATE_ONLINE)
+		{
+			m_ExtraSendConnInfo = false;
+			SendInfo(CONN_EXTRA);
+			SendReady(CONN_EXTRA);
+			SendExtraInfo();
+			m_ExtraPredTick = 1;
+			m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "client", "Extra connection established (socket online).");
+		}
 	}
 
 	// process packets
@@ -2745,9 +2957,17 @@ void CClient::PumpNetwork()
 				ProcessConnlessPacket(&Packet);
 				continue;
 			}
-			if(Conn == CONN_MAIN || Conn == CONN_DUMMY)
+			if(Conn == CONN_MAIN)
 			{
 				ProcessServerPacket(&Packet, Conn, g_Config.m_ClDummy ^ Conn);
+			}
+			else if(Conn == CONN_DUMMY)
+			{
+				ProcessServerPacket(&Packet, Conn, true);
+			}
+			else if(Conn == CONN_EXTRA)
+			{
+				ProcessServerPacket(&Packet, Conn, true);
 			}
 		}
 	}
@@ -2899,7 +3119,85 @@ void CClient::Update()
 			}
 		}
 
-		if(m_aapSnapshots[g_Config.m_ClDummy][SNAP_CURRENT])
+		if(IsExtraSnapshotActive() && m_aapExtraSnapshots[SNAP_CURRENT] &&
+			m_aNetClient[CONN_EXTRA].State() == NETSTATE_ONLINE)
+		{
+			bool Repredict = false;
+			int64_t Now = m_aGameTime[g_Config.m_ClDummy].Get(time_get());
+			int64_t PredNow = m_PredictedTime.Get(time_get());
+
+			while(true)
+			{
+				if(!m_aapExtraSnapshots[SNAP_CURRENT]->m_pNext)
+					break;
+				int64_t TickStart = m_aapExtraSnapshots[SNAP_CURRENT]->m_Tick * time_freq() / GameTickSpeed();
+				if(TickStart >= Now)
+					break;
+				m_aapExtraSnapshots[SNAP_PREV] = m_aapExtraSnapshots[SNAP_CURRENT];
+				m_aapExtraSnapshots[SNAP_CURRENT] = m_aapExtraSnapshots[SNAP_CURRENT]->m_pNext;
+				m_aapSnapshots[CONN_EXTRA][SNAP_PREV] = m_aapExtraSnapshots[SNAP_PREV];
+				m_aapSnapshots[CONN_EXTRA][SNAP_CURRENT] = m_aapExtraSnapshots[SNAP_CURRENT];
+				m_aCurGameTick[g_Config.m_ClDummy] = m_aapExtraSnapshots[SNAP_CURRENT]->m_Tick;
+				m_aPrevGameTick[g_Config.m_ClDummy] = m_aapExtraSnapshots[SNAP_PREV]->m_Tick;
+				GameClient()->OnNewSnapshot(false);
+				Repredict = true;
+			}
+
+			if(m_aapExtraSnapshots[SNAP_PREV])
+			{
+				int64_t CurTickStart = m_aapExtraSnapshots[SNAP_CURRENT]->m_Tick * time_freq() / GameTickSpeed();
+				int64_t PrevTickStart = m_aapExtraSnapshots[SNAP_PREV]->m_Tick * time_freq() / GameTickSpeed();
+				int PrevPredTick = (int)(PredNow * GameTickSpeed() / time_freq());
+				int NewPredTick = PrevPredTick + 1;
+
+				m_aGameIntraTick[g_Config.m_ClDummy] = (Now - PrevTickStart) / (float)(CurTickStart - PrevTickStart);
+				m_aGameTickTime[g_Config.m_ClDummy] = (Now - PrevTickStart) / (float)time_freq();
+				m_aGameIntraTickSincePrev[g_Config.m_ClDummy] = (Now - PrevTickStart) / (float)(time_freq() / GameTickSpeed());
+
+				int64_t CurPredTickStart = NewPredTick * time_freq() / GameTickSpeed();
+				int64_t PrevPredTickStart = PrevPredTick * time_freq() / GameTickSpeed();
+				m_aPredIntraTick[g_Config.m_ClDummy] = (PredNow - PrevPredTickStart) / (float)(CurPredTickStart - PrevPredTickStart);
+
+				if(absolute(NewPredTick - m_aapExtraSnapshots[SNAP_PREV]->m_Tick) > MaxLatencyTicks())
+				{
+					m_pConsole->Print(IConsole::OUTPUT_LEVEL_ADDINFO, "client", "prediction time reset!");
+					m_PredictedTime.Init(CurTickStart + 2 * time_freq() / GameTickSpeed());
+				}
+
+				if(NewPredTick > m_aPredTick[g_Config.m_ClDummy])
+				{
+					m_aPredTick[g_Config.m_ClDummy] = NewPredTick;
+					Repredict = true;
+				}
+
+				if(m_aExtraReceivedSnapshots > 2)
+				{
+					int64_t NowSmooth = m_aGameTime[g_Config.m_ClDummy].Get(time_get());
+					int64_t TimeLeft = (CurTickStart - NowSmooth) * 1000 / time_freq();
+					m_aGameTime[g_Config.m_ClDummy].Update(&m_aGametimeMarginGraphs[g_Config.m_ClDummy],
+						(m_aapExtraSnapshots[SNAP_CURRENT]->m_Tick - 1) * time_freq() / GameTickSpeed(),
+						TimeLeft, CSmoothTime::ADJUSTDIRECTION_DOWN);
+				}
+			}
+
+					// Если тик откатился (переключение main↔extra), сбрасываем, чтобы не блокировать отправку
+			if(m_LastExtraSentTick > m_aPredTick[g_Config.m_ClDummy])
+				m_LastExtraSentTick = -1;
+			if(m_aPredTick[g_Config.m_ClDummy] > m_LastExtraSentTick)
+			{
+				m_LastExtraSentTick = m_aPredTick[g_Config.m_ClDummy];
+				SendInput();
+			}
+
+			if(Repredict)
+			{
+				if(m_aPredTick[g_Config.m_ClDummy] > m_aCurGameTick[g_Config.m_ClDummy] &&
+					m_aPredTick[g_Config.m_ClDummy] < m_aCurGameTick[g_Config.m_ClDummy] + MaxLatencyTicks())
+					GameClient()->OnPredict();
+			}
+		}
+
+		if(m_aapSnapshots[g_Config.m_ClDummy][SNAP_CURRENT] && !IsExtraSnapshotActive())
 		{
 			// switch snapshot
 			bool Repredict = false;
@@ -3023,6 +3321,14 @@ void CClient::Update()
 	{
 		static int64_t s_ActionTaken = 0;
 		int64_t Now = time_get();
+		if(m_ActiveConn == CONN_EXTRA && m_aNetClient[CONN_EXTRA].State() != NETSTATE_ONLINE)
+		{
+			m_ActiveConn = CONN_MAIN;
+			g_Config.m_ClAntiPing = m_SavedAntiPing;
+			g_Config.m_ClAntiPingPlayers = m_SavedAntiPingPlayers;
+			g_Config.m_ClAntiPingGrenade = m_SavedAntiPingGrenade;
+			g_Config.m_ClAntiPingWeapons = m_SavedAntiPingWeapons;
+		}
 		if(State() == IClient::STATE_OFFLINE)
 		{
 			if(Now > s_ActionTaken + time_freq() * 2)
@@ -3181,6 +3487,11 @@ void CClient::InitInterfaces()
 void CClient::Run()
 {
 	m_LocalStartTime = m_GlobalStartTime = time_get();
+	{
+		char aBuf[64];
+		str_format(aBuf, sizeof(aBuf), "Client init: m_ActiveConn=%d", m_ActiveConn);
+		m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "client", aBuf);
+	}
 	m_aSnapshotParts[0] = 0;
 	m_aSnapshotParts[1] = 0;
 
@@ -3589,6 +3900,8 @@ bool CClient::InitNetworkClientImpl(NETADDR BindAddr, int Conn, char *pError, si
 {
 	int *pPort;
 	const char *pName;
+	int ExtraPort = 0; // Объявляем здесь
+
 	switch(Conn)
 	{
 	case CONN_MAIN:
@@ -3603,15 +3916,20 @@ bool CClient::InitNetworkClientImpl(NETADDR BindAddr, int Conn, char *pError, si
 		pPort = &g_Config.m_ClContactPort;
 		pName = "contact";
 		break;
+	case CONN_EXTRA: // Добавили кейс
+		pPort = &ExtraPort;
+		pName = "extra";
+		break;
 	default:
 		dbg_assert_failed("unreachable");
-	}
+	} // ЗАКРЫВАЕМ SWITCH
+
 	if(m_aNetClient[Conn].State() != NETSTATE_OFFLINE)
 	{
 		str_format(pError, ErrorSize, "Could not open network client %s while already connected.", pName);
 		return false;
 	}
-	if(*pPort < 1024) // Reject users setting ports that we don't want to use
+	if(*pPort < 1024) 
 		*pPort = 0;
 	BindAddr.port = *pPort;
 
@@ -3631,7 +3949,7 @@ bool CClient::InitNetworkClientImpl(NETADDR BindAddr, int Conn, char *pError, si
 			BindAddr.port = 0;
 	}
 	return true;
-}
+} // ЗАКРЫВАЕМ ФУНКЦИЮ
 
 bool CClient::CtrlShiftKey(int Key, bool &Last)
 {
@@ -3647,7 +3965,221 @@ bool CClient::CtrlShiftKey(int Key, bool &Last)
 
 	return false;
 }
+void CClient::Connect(const char *pAddress, const char *pPassword)
+{
+	// Disconnect will not change the state if we are already quitting/restarting
+	if(m_State == IClient::STATE_QUITTING || m_State == IClient::STATE_RESTARTING)
+		return;
+	Disconnect();
+	dbg_assert(m_State == IClient::STATE_OFFLINE, "Disconnect must ensure that client is offline");
 
+	const NETADDR LastAddr = ServerAddress();
+
+	if(pAddress != m_aConnectAddressStr)
+		str_copy(m_aConnectAddressStr, pAddress);
+
+	char aMsg[512];
+	str_format(aMsg, sizeof(aMsg), "connecting to '%s'", m_aConnectAddressStr);
+	m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "client", aMsg, CLIENT_NETWORK_PRINT_COLOR);
+
+	int NumConnectAddrs = 0;
+	NETADDR aConnectAddrs[MAX_SERVER_ADDRESSES];
+	mem_zero(aConnectAddrs, sizeof(aConnectAddrs));
+	const char *pNextAddr = pAddress;
+	char aBuffer[128];
+	bool OnlySixup = true;
+	while((pNextAddr = str_next_token(pNextAddr, ",", aBuffer, sizeof(aBuffer))))
+	{
+		NETADDR NextAddr;
+		char aHost[128];
+		const int UrlParseResult = net_addr_from_url(&NextAddr, aBuffer, aHost, sizeof(aHost));
+		bool Sixup = NextAddr.type & NETTYPE_TW7;
+		if(UrlParseResult > 0)
+			str_copy(aHost, aBuffer);
+
+		if(net_host_lookup(aHost, &NextAddr, m_aNetClient[CONN_MAIN].NetType()) != 0)
+		{
+			log_error("client", "could not find address of %s", aHost);
+			continue;
+		}
+		if(NumConnectAddrs == (int)std::size(aConnectAddrs))
+		{
+			log_warn("client", "too many connect addresses, ignoring %s", aHost);
+			continue;
+		}
+		if(NextAddr.port == 0)
+		{
+			NextAddr.port = 8303;
+		}
+		if(Sixup)
+			NextAddr.type |= NETTYPE_TW7;
+		else
+			OnlySixup = false;
+
+		char aNextAddr[NETADDR_MAXSTRSIZE];
+		net_addr_str(&NextAddr, aNextAddr, sizeof(aNextAddr), true);
+		log_debug("client", "resolved connect address '%s' to %s", aBuffer, aNextAddr);
+
+		if(NextAddr == LastAddr)
+		{
+			m_SendPassword = true;
+		}
+
+		aConnectAddrs[NumConnectAddrs] = NextAddr;
+		NumConnectAddrs += 1;
+	}
+
+	if(NumConnectAddrs == 0)
+	{
+		log_error("client", "could not find any connect address");
+		char aWarning[256];
+		str_format(aWarning, sizeof(aWarning), Localize("Could not resolve connect address '%s'. See local console for details."), m_aConnectAddressStr);
+		SWarning Warning(Localize("Connect address error"), aWarning);
+		Warning.m_AutoHide = false;
+		AddWarning(Warning);
+		return;
+	}
+
+	m_ConnectionId = RandomUuid();
+	ServerInfoRequest();
+
+	if(m_SendPassword)
+	{
+		str_copy(m_aPassword, g_Config.m_Password);
+		m_SendPassword = false;
+	}
+	else if(!pPassword)
+	{
+		m_aPassword[0] = 0;
+	}
+	else
+	{
+		str_copy(m_aPassword, pPassword);
+	}
+
+	m_CanReceiveServerCapabilities = true;
+
+	m_Sixup = OnlySixup;
+	if(m_Sixup)
+	{
+		m_aNetClient[CONN_MAIN].Connect7(aConnectAddrs, NumConnectAddrs);
+	}
+	else
+	{
+		m_aNetClient[CONN_MAIN].Connect(aConnectAddrs, NumConnectAddrs);
+	}
+
+	m_aNetClient[CONN_MAIN].RefreshStun();
+	SetState(IClient::STATE_CONNECTING);
+
+	m_aInputtimeMarginGraphs[CONN_MAIN].Init(-150.0f, 150.0f);
+	m_aGametimeMarginGraphs[CONN_MAIN].Init(-150.0f, 150.0f);
+
+	GenerateTimeoutCodes(aConnectAddrs, NumConnectAddrs);
+}
+
+void CClient::Con_ToggleExtra(IConsole::IResult *pResult, void *pUserData)
+{
+	CClient *pSelf = (CClient *)pUserData;
+
+	const bool ExtraOnline = pSelf->m_aNetClient[CONN_EXTRA].State() == NETSTATE_ONLINE;
+	const bool DummyOnline = pSelf->DummyConnected();
+
+	// Сбросить input, чтобы fire/jump/hook не переносились на новое соединение
+	pSelf->GameClient()->ResetPlayerInput(0);
+	pSelf->GameClient()->ResetPlayerInput(1);
+
+	if(!ExtraOnline && !DummyOnline)
+	{
+		pSelf->m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "client", "Neither extra nor dummy connected.");
+		return;
+	}
+
+	const bool OnDummy = g_Config.m_ClDummy == 1;
+	const bool OnExtra = !OnDummy && pSelf->m_ActiveConn == CONN_EXTRA;
+
+	if(OnExtra)
+	{
+		// extra -> dummy (если есть) или main
+		pSelf->m_ActiveConn = CONN_MAIN;
+
+		if(DummyOnline)
+		{
+			g_Config.m_ClDummy = 1;
+			pSelf->m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "client", "== Control: DUMMY ==");
+			return;
+		}
+
+		// Восстановить main-снапшоты из storage
+		auto &MainStorage = pSelf->m_aSnapshotStorage[CONN_MAIN];
+		CSnapshotStorage::CHolder *pCur = MainStorage.m_pLast;
+		CSnapshotStorage::CHolder *pPrev = nullptr;
+		if(pCur)
+		{
+			for(auto *p = MainStorage.m_pFirst; p && p->m_pNext; p = p->m_pNext)
+				if(p->m_pNext == pCur)
+				{
+					pPrev = p;
+					break;
+				}
+		}
+		if(pCur && pPrev)
+		{
+			pSelf->m_aapSnapshots[CONN_MAIN][SNAP_CURRENT] = pCur;
+			pSelf->m_aapSnapshots[CONN_MAIN][SNAP_PREV] = pPrev;
+			pSelf->m_aCurGameTick[0] = pCur->m_Tick;
+			pSelf->m_aPrevGameTick[0] = pPrev->m_Tick;
+			pSelf->m_aPredTick[0] = pCur->m_Tick + 1;
+			pSelf->m_PredictedTime.Init(pCur->m_Tick * time_freq() / pSelf->GameTickSpeed());
+			pSelf->m_PredictedTime.SetAdjustSpeed(CSmoothTime::ADJUSTDIRECTION_UP, 1000.0f);
+			pSelf->m_PredictedTime.UpdateMargin(pSelf->PredictionMargin() * time_freq() / 1000);
+			pSelf->m_aGameTime[0].Init((pCur->m_Tick - 1) * time_freq() / pSelf->GameTickSpeed());
+			MainStorage.PurgeUntil(pPrev->m_Tick);
+			pSelf->GameClient()->InvalidateSnapshot();
+			pSelf->GameClient()->OnNewSnapshot(true);
+		}
+		pSelf->m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "client", "== Control: MAIN ==");
+	}
+	else if(OnDummy)
+	{
+		// dummy -> main
+		g_Config.m_ClDummy = 0;
+		pSelf->m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "client", "== Control: MAIN ==");
+	}
+	else
+	{
+		// main -> extra (если есть) или dummy
+		if(ExtraOnline)
+		{
+			pSelf->m_ActiveConn = CONN_EXTRA;
+			pSelf->m_LastExtraSentTick = -1;
+			pSelf->m_aExtraReceivedSnapshots = 0;
+			pSelf->m_aapExtraSnapshots[SNAP_CURRENT] = nullptr;
+			pSelf->m_aapExtraSnapshots[SNAP_PREV] = nullptr;
+			pSelf->m_aapSnapshots[CONN_EXTRA][SNAP_CURRENT] = nullptr;
+			pSelf->m_aapSnapshots[CONN_EXTRA][SNAP_PREV] = nullptr;
+			pSelf->GameClient()->InvalidateSnapshot();
+			pSelf->m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "client", "== Control: EXTRA ==");
+		}
+		else if(DummyOnline)
+		{
+			g_Config.m_ClDummy = 1;
+			pSelf->m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "client", "== Control: DUMMY ==");
+		}
+	}
+}
+
+void CClient::ConExtraConnect(IConsole::IResult *pResult, void *pUserData)
+{
+	CClient *pSelf = (CClient *)pUserData;
+	const char *pAddr = pResult->NumArguments() ? pResult->GetString(0) : pSelf->ConnectAddressString();
+	if(pAddr == nullptr || pAddr[0] == '\0')
+	{
+		pSelf->m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "client", "Not connected to any server, pass an address.");
+		return;
+	}
+	pSelf->ExtraConnect(pAddr);
+}
 void CClient::Con_Connect(IConsole::IResult *pResult, void *pUserData)
 {
 	CClient *pSelf = (CClient *)pUserData;
@@ -4643,7 +5175,8 @@ void CClient::ConchainStdoutOutputLevel(IConsole::IResult *pResult, void *pUserD
 void CClient::RegisterCommands()
 {
 	m_pConsole = Kernel()->RequestInterface<IConsole>();
-
+	m_pConsole->Register("extra_connect", "?r[host|ip]", CFGFLAG_CLIENT, ConExtraConnect, this, "Connect an extra client to a server (current server if omitted)");
+	m_pConsole->Register("toggle_extra", "", CFGFLAG_CLIENT, Con_ToggleExtra, this, "Toggle control between main and extra");
 	m_pConsole->Register("dummy_connect", "", CFGFLAG_CLIENT, Con_DummyConnect, this, "Connect dummy");
 	m_pConsole->Register("dummy_disconnect", "", CFGFLAG_CLIENT, Con_DummyDisconnect, this, "Disconnect dummy");
 	m_pConsole->Register("dummy_reset", "", CFGFLAG_CLIENT, Con_DummyResetInput, this, "Reset dummy");

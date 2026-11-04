@@ -338,7 +338,15 @@ void CCamera::OnRender()
 			m_CamType = CAMTYPE_PLAYER;
 		}
 
-		if(GameClient()->m_Snap.m_SpecInfo.m_Active)
+		if(Client()->IsExtraActive())
+		{
+			const int ExtraId = Client()->GetExtraClientId();
+			if(ExtraId >= 0 && ExtraId < MAX_CLIENTS)
+				m_Center = GameClient()->m_aClients[ExtraId].m_RenderPos + m_aDyncamCurrentCameraOffset[g_Config.m_ClDummy];
+			else
+				m_Center = GameClient()->m_LocalCharacterPos + m_aDyncamCurrentCameraOffset[g_Config.m_ClDummy];
+		}
+		else if(GameClient()->m_Snap.m_SpecInfo.m_Active)
 			m_Center = GameClient()->m_Snap.m_SpecInfo.m_Position + m_aDyncamCurrentCameraOffset[g_Config.m_ClDummy];
 		else
 			m_Center = GameClient()->m_LocalCharacterPos + m_aDyncamCurrentCameraOffset[g_Config.m_ClDummy];

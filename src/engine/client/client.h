@@ -78,6 +78,13 @@ class CClient : public IClient, public CDemoPlayer::IListener
 	IUpdater *m_pUpdater = nullptr;
 
 	CNetClient m_aNetClient[NUM_CONNS];
+	int m_ActiveConn = CONN_MAIN;
+	int m_ExtraPredTick = 1;
+	int m_LastExtraSentTick = -1;
+	int m_SavedAntiPing = 1;
+	int m_SavedAntiPingPlayers = 1;
+	int m_SavedAntiPingGrenade = 1;
+	int m_SavedAntiPingWeapons = 1;
 	CDemoPlayer m_DemoPlayer;
 	CDemoRecorder m_aDemoRecorders[RECORDER_MAX];
 	CDemoRecorder m_aDemoRecordersSixup[RECORDER_MAX];
@@ -92,12 +99,13 @@ class CClient : public IClient, public CDemoPlayer::IListener
 	char m_aConnectAddressStr[MAX_SERVER_ADDRESSES * NETADDR_MAXSTRSIZE] = "";
 
 	CUuid m_ConnectionId = UUID_ZEROED;
+	CUuid m_ExtraConnectionId = UUID_ZEROED;
 	bool m_Sixup;
 
 	bool m_HaveGlobalTcpAddr = false;
 	NETADDR m_GlobalTcpAddr = NETADDR_ZEROED;
 
-	uint64_t m_aSnapshotParts[NUM_DUMMIES] = {0, 0};
+	uint64_t m_aSnapshotParts[NUM_CONNS] = {0, 0, 0, 0};
 	int64_t m_LocalStartTime = 0;
 	int64_t m_GlobalStartTime = 0;
 
@@ -111,9 +119,9 @@ class CClient : public IClient, public CDemoPlayer::IListener
 	bool m_AutoCSVRecycle = false;
 	bool m_EditorActive = false;
 
-	int m_aAckGameTick[NUM_DUMMIES] = {-1, -1};
-	int m_aCurrentRecvTick[NUM_DUMMIES] = {0, 0};
-	int m_aRconAuthed[NUM_DUMMIES] = {0, 0};
+	int m_aAckGameTick[NUM_CONNS] = {-1, -1, -1, -1};
+	int m_aCurrentRecvTick[NUM_CONNS] = {0, 0, 0, 0};
+	int m_aRconAuthed[NUM_CONNS] = {0, 0, 0, 0};
 	char m_aRconUsername[64] = "";
 	char m_aRconPassword[sizeof(g_Config.m_SvRconPassword)] = "";
 	int m_UseTempRconCommands = 0;
@@ -131,8 +139,8 @@ class CClient : public IClient, public CDemoPlayer::IListener
 	// pinging
 	int64_t m_PingStartTime = 0;
 
-	char m_aTimeoutCodes[NUM_DUMMIES][32] = {"", ""};
-	bool m_aDidPostConnect[NUM_DUMMIES] = {false, false};
+	char m_aTimeoutCodes[NUM_CONNS][32] = {"", "", "", ""};
+	bool m_aDidPostConnect[NUM_CONNS] = {false, false, false, false};
 	bool m_GenerateTimeoutSeed = true;
 
 	char m_aCmdConnect[256] = "";
@@ -167,7 +175,7 @@ class CClient : public IClient, public CDemoPlayer::IListener
 	std::shared_ptr<IHttpRequest> m_pDDNetInfoTask = nullptr;
 
 	// time
-	CSmoothTime m_aGameTime[NUM_DUMMIES];
+	CSmoothTime m_aGameTime[NUM_CONNS];
 	CSmoothTime m_PredictedTime;
 
 	// input
@@ -178,11 +186,12 @@ class CClient : public IClient, public CDemoPlayer::IListener
 		int64_t m_PredictedTime; // prediction latency when we sent this input
 		int64_t m_PredictionMargin; // prediction margin when we sent this input
 		int64_t m_Time;
-	} m_aInputs[NUM_DUMMIES][200];
+	} m_aInputs[NUM_CONNS][200];
 
-	int m_aCurrentInput[NUM_DUMMIES] = {0, 0};
+	int m_aCurrentInput[NUM_CONNS] = {0, 0, 0, 0};
 	bool m_LastDummy = false;
 	bool m_DummySendConnInfo = false;
+	bool m_ExtraSendConnInfo = false;
 	bool m_DummyConnecting = false;
 	bool m_DummyConnected = false;
 	float m_LastDummyConnectTime = 0.0f;
@@ -193,17 +202,28 @@ class CClient : public IClient, public CDemoPlayer::IListener
 #endif
 
 	// graphs
-	CGraph m_aInputtimeMarginGraphs[NUM_DUMMIES];
-	CGraph m_aGametimeMarginGraphs[NUM_DUMMIES];
+	CGraph m_aInputtimeMarginGraphs[NUM_CONNS];
+	CGraph m_aGametimeMarginGraphs[NUM_CONNS];
 	CGraph m_FpsGraph;
 
 	// the game snapshots are modifiable by the game
-	CSnapshotStorage m_aSnapshotStorage[NUM_DUMMIES];
-	CSnapshotStorage::CHolder *m_aapSnapshots[NUM_DUMMIES][NUM_SNAPSHOT_TYPES];
+	CSnapshotStorage m_aSnapshotStorage[NUM_CONNS];
+	CSnapshotStorage::CHolder *m_aapSnapshots[NUM_CONNS][NUM_SNAPSHOT_TYPES];
 
-	int m_aReceivedSnapshots[NUM_DUMMIES] = {0, 0};
-	char m_aaSnapshotIncomingData[NUM_DUMMIES][CSnapshot::MAX_SIZE];
-	int m_aSnapshotIncomingDataSize[NUM_DUMMIES] = {0, 0};
+	CSnapshotStorage m_ExtraSnapshotStorage;
+	CSnapshotStorage::CHolder *m_aapExtraSnapshots[NUM_SNAPSHOT_TYPES] = {nullptr, nullptr};
+	int m_aExtraReceivedSnapshots = 0;
+	int m_aExtraCurrentRecvTick = 0;
+	char m_aaExtraSnapshotIncomingData[CSnapshot::MAX_SIZE] = {};
+	int m_aExtraSnapshotIncomingDataSize = 0;
+	uint64_t m_aExtraSnapshotParts = 0;
+
+	bool IsExtraSnapshotActive() const;
+	const CSnapshotStorage::CHolder *GetActiveSnapshot(int SnapId) const;
+
+	int m_aReceivedSnapshots[NUM_CONNS] = {0, 0, 0, 0};
+	char m_aaSnapshotIncomingData[NUM_CONNS][CSnapshot::MAX_SIZE];
+	int m_aSnapshotIncomingDataSize[NUM_CONNS] = {0, 0, 0, 0};
 
 	CSnapshotStorage::CHolder m_aDemorecSnapshotHolders[NUM_SNAPSHOT_TYPES];
 	CSnapshotBuffer m_aaDemorecSnapshotData[NUM_SNAPSHOT_TYPES][2];
@@ -301,8 +321,9 @@ public:
 	int SendMsg(int Conn, CMsgPacker *pMsg, int Flags) override;
 	// Send via the currently active client (main/dummy)
 	int SendMsgActive(CMsgPacker *pMsg, int Flags) override;
-
+	
 	void SendInfo(int Conn);
+	void SendExtraInfo();
 	void SendEnterGame(int Conn);
 	void SendReady(int Conn);
 	void SendMapRequest();
@@ -325,6 +346,8 @@ public:
 
 	// TODO: OPT: do this a lot smarter!
 	int *GetInput(int Tick, int IsDummy) const override;
+	int *GetExtraInput(int Tick) const override;
+	int *GetMainInput(int Tick) const override;
 
 	const char *LatestVersion() const override;
 
@@ -341,7 +364,9 @@ public:
 	void Connect(const char *pAddress, const char *pPassword = nullptr) override;
 	void DisconnectWithReason(const char *pReason);
 	void Disconnect() override;
-
+	void ExtraConnect(const char *pAddress);
+	static void ConExtraConnect(IConsole::IResult *pResult, void *pUserData);
+	static void Con_ToggleExtra(IConsole::IResult *pResult, void *pUserData);
 	void DummyDisconnect(const char *pReason) override;
 	void DummyConnect() override;
 	bool DummyConnected() const override;
@@ -401,6 +426,8 @@ public:
 	void LoadDDNetInfo();
 
 	bool IsSixup() const override { return m_Sixup; }
+	bool IsExtraActive() const override { return m_ActiveConn == CONN_EXTRA && g_Config.m_ClDummy == 0; }
+	int GetExtraClientId() const override { return GameClient()->FindExtraClient(); }
 
 	const NETADDR &ServerAddress() const override { return *m_aNetClient[CONN_MAIN].ServerAddress(); }
 	int ConnectNetTypes() const override;
