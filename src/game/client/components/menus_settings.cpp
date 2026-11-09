@@ -430,8 +430,8 @@ void CMenus::RenderSettingsTestClient(CUIRect MainView)
 	MainView.HSplitTop(12.0f, nullptr, &MainView);
 	MainView.HSplitTop(20.0f, &Button, &MainView);
 	static CButtonContainer s_CopyAllCheckbox;
-	if(DoButton_CheckBox(&s_CopyAllCheckbox, Localize("All connections copy moves"), g_Config.m_ClTestClientCopyMovesAll, &Button))
-		g_Config.m_ClTestClientCopyMovesAll ^= 1;
+	if(DoButton_CheckBox(&s_CopyAllCheckbox, Localize("All connections copy moves"), g_Config.m_ClDummyCopyMoves, &Button))
+		g_Config.m_ClDummyCopyMoves ^= 1;
 
 	MainView.HSplitTop(4.0f, nullptr, &MainView);
 	MainView.HSplitTop(16.0f, &Label, &MainView);

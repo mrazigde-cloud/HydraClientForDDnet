@@ -659,6 +659,7 @@ public:
 	int FindExtraClient() const override;
 	int FindClientByConnectionId(const CUuid &ConnectionId) const;
 	bool IsExtraName(const char *pName) const;
+	bool IsCopyAllOwnTee(int ClientId) const;
 	const char *GetItemName(int Type) const override;
 	const char *Version() const override;
 	const char *NetVersion() const override;

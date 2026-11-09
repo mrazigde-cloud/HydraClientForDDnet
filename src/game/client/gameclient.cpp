@@ -105,7 +105,28 @@ bool CGameClient::IsExtraName(const char *pName) const
 		return str_comp(pName + 5, pMe) == 0;
 	return false;
 }
-
+bool CGameClient::IsCopyAllOwnTee(int ClientId) const
+{
+	// "Свой" тии: активный локальный, main, dummy или любой extra
+	if(ClientId < 0 || ClientId >= MAX_CLIENTS)
+		return false;
+	if(ClientId == m_Snap.m_LocalClientId)
+		return true;
+	const char *pName = m_aClients[ClientId].m_aName;
+	if(pName[0] == '\0')
+		return false;
+	if(IsExtraName(pName))
+		return true;
+	if(str_comp(pName, Client()->PlayerName()) == 0)
+		return true;
+	if(Client()->DummyConnected())
+	{
+		const char *pDummyName = Client()->DummyName();
+		if(pDummyName[0] != '\0' && str_comp(pName, pDummyName) == 0)
+			return true;
+	}
+	return false;
+}
 int CGameClient::FindExtraClient() const
 {
 	const int Idx = Client()->GetActiveExtraIndex();
@@ -1110,6 +1131,9 @@ void CGameClient::OnRelease()
 
 void CGameClient::OnMessage(int MsgId, CUnpacker *pUnpacker, int Conn, bool Dummy)
 {
+	// Активный extra играет в слоте 0 (g_Config.m_ClDummy == 0), поэтому для индексации приводим Conn к слоту.
+	const int Slot = IClient::IsExtraConn(Conn) ? 0 : Conn;
+
 	// special messages
 	static_assert((int)NETMSGTYPE_SV_TUNEPARAMS == (int)protocol7::NETMSGTYPE_SV_TUNEPARAMS, "0.6 and 0.7 tune message id do not match");
 	if(MsgId == NETMSGTYPE_SV_TUNEPARAMS)
@@ -2659,7 +2683,7 @@ void CGameClient::ApplyPreInputs(int Tick, bool Direct, CGameWorld &GameWorld)
 		if(IsAnyExtraName || IsMainChar || IsDummyChar)
 		{
 			int SourceConn = -1;
-			if(g_Config.m_ClTestClientCopyMovesAll)
+			if(g_Config.m_ClDummyCopyMoves)
 			{
 				const char *pName = m_aClients[ClientId].m_aName;
 				if(str_startswith(pName, "[E] ") && str_comp(pName + 4, Client()->PlayerName()) == 0)
@@ -2915,7 +2939,7 @@ void CGameClient::OnPredict()
 			if(!m_Snap.m_aCharacters[i].m_Active || i == m_Snap.m_LocalClientId || !m_aLastActive[i])
 				continue;
 			// В CopyAll extras двигаются предсказуемо — применяем smoothing как для обычных игроков
-			if(IsExtraName(m_aClients[i].m_aName) && !g_Config.m_ClTestClientCopyMovesAll)
+			if(IsExtraName(m_aClients[i].m_aName) && !g_Config.m_ClDummyCopyMoves)
 				continue;
 			vec2 NewPos = (m_PredictedTick == Client()->PredGameTick(g_Config.m_ClDummy)) ? m_aClients[i].m_Predicted.m_Pos : m_aClients[i].m_PrevPredicted.m_Pos;
 			vec2 PredErr = (m_aLastPos[i] - NewPos) / (float)std::min(Client()->GetPredictionTime(), 200);
@@ -3933,9 +3957,12 @@ void CGameClient::UpdateRenderedCharacters()
 		CCharacter *pChar = m_PredictedWorld.GetCharacterById(i);
 		const bool IsDummy = PredictDummy() && i == m_aLocalIds[!g_Config.m_ClDummy];
 		const bool ExtraForced = Client()->IsExtraActive();
-		const bool IsExtraChar = !ExtraForced && IsExtraName(m_aClients[i].m_aName);
-		bool AntiPingPlayer = ExtraForced || (!IsExtraChar && (AntiPingPlayers() == 1 || (AntiPingPlayers() >= 2 && (IsDummy || (pChar && pChar->IsInterfering())))));
-		if(Predict() && (i == m_Snap.m_LocalClientId || (AntiPingPlayer && (ExtraForced || !IsOtherTeam(i)))) && pChar)
+		// CopyAll: extras получают тот же инпут, что и мы, поэтому предсказываем их так же, как при игре за extra
+		// (и dummy/main, который сейчас не под управлением: он предсказывается через PredictDummy)
+		const bool CopyAllExtra = g_Config.m_ClDummyCopyMoves && (IsExtraName(m_aClients[i].m_aName) || IsDummy);
+		const bool IsExtraChar = !ExtraForced && !CopyAllExtra && IsExtraName(m_aClients[i].m_aName);
+		bool AntiPingPlayer = ExtraForced || CopyAllExtra || (!IsExtraChar && (AntiPingPlayers() == 1 || (AntiPingPlayers() >= 2 && (IsDummy || (pChar && pChar->IsInterfering())))));
+		if(Predict() && (i == m_Snap.m_LocalClientId || (AntiPingPlayer && (ExtraForced || CopyAllExtra || !IsOtherTeam(i)))) && pChar)
 		{
 			m_aClients[i].m_Predicted.Write(&m_aClients[i].m_RenderCur);
 			m_aClients[i].m_PrevPredicted.Write(&m_aClients[i].m_RenderPrev);
@@ -3975,7 +4002,7 @@ void CGameClient::UpdateRenderedCharacters()
 	// CopyAll: все "свои" (dummy + extras) должны смотреть туда же, куда локальный.
 	// RenderTee использует m_TargetX/Y из DDNetCharacter extended data (не m_Angle),
 	// поэтому копируем их из снапшота локального.
-	if(g_Config.m_ClTestClientCopyMovesAll)
+	if(g_Config.m_ClDummyCopyMoves)
 	{
 		const int LocalId = m_Snap.m_LocalClientId;
 		if(LocalId >= 0 && LocalId < MAX_CLIENTS && m_Snap.m_aCharacters[LocalId].m_Active && m_Snap.m_aCharacters[LocalId].m_HasExtendedData)

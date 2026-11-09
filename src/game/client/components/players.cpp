@@ -100,6 +100,16 @@ float CPlayers::GetPlayerTargetAngle(
 	int ClientId,
 	float Intra)
 {
+	// CopyAll: все свои тии (main/dummy/extra1/extra2) смотрят туда же, куда живой курсор активного соединения
+	if(g_Config.m_ClDummyCopyMoves && ClientId >= 0 && GameClient()->IsCopyAllOwnTee(ClientId) &&
+		!GameClient()->m_Snap.m_SpecInfo.m_Active && Client()->State() != IClient::STATE_DEMOPLAYBACK)
+	{
+		vec2 Direction = normalize(vec2((int)GameClient()->m_Controls.m_aMousePos[g_Config.m_ClDummy].x, (int)GameClient()->m_Controls.m_aMousePos[g_Config.m_ClDummy].y));
+		if(Direction == vec2(0.0f, 0.0f))
+			Direction = vec2(1.0f, 0.0f);
+		return angle(Direction);
+	}
+
 	if(GameClient()->PredictDummy() && GameClient()->m_aLocalIds[!g_Config.m_ClDummy] == ClientId)
 	{
 		const CNetObj_PlayerInput &Input = g_Config.m_ClDummyHammer ? GameClient()->m_HammerInput : GameClient()->m_DummyInput;

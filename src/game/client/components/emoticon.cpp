@@ -208,6 +208,22 @@ void CEmoticon::Emote(int Emoticon)
 {
 	CNetMsg_Cl_Emoticon Msg;
 	Msg.m_Emoticon = Emoticon;
+
+	if(g_Config.m_ClDummyCopyMoves)
+	{
+		// CopyAll: эмоция уходит на все подключённые соединения одновременно
+		Client()->SendPackMsg(IClient::CONN_MAIN, &Msg, MSGFLAG_VITAL);
+		if(Client()->DummyConnected())
+			Client()->SendPackMsg(IClient::CONN_DUMMY, &Msg, MSGFLAG_VITAL);
+		for(int ExtraIdx = 0; ExtraIdx < IClient::NUM_EXTRA_CONNS; ExtraIdx++)
+		{
+			const int Conn = IClient::ExtraIndexToConn(ExtraIdx);
+			if(Client()->IsExtraConnOnline(Conn))
+				Client()->SendPackMsg(Conn, &Msg, MSGFLAG_VITAL);
+		}
+		return;
+	}
+
 	Client()->SendPackMsgActive(&Msg, MSGFLAG_VITAL);
 }
 

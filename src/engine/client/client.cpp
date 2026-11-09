@@ -383,7 +383,7 @@ void CClient::SendInput()
 		return;
 
 	const bool ExtraActive = IClient::IsExtraConn(m_ActiveConn) && m_aNetClient[m_ActiveConn].State() == NETSTATE_ONLINE;
-	const bool CopyAll = g_Config.m_ClTestClientCopyMovesAll != 0;
+	const bool CopyAll = g_Config.m_ClDummyCopyMoves != 0;
 
 	// Кэшируем input один раз — берём напрямую из m_Controls (а не SnapInput,
 	// который может вернуть 0 "нет изменений" → extras получат нули и будут "спамить")
