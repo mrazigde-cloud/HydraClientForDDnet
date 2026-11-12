@@ -23,6 +23,8 @@
 #include <memory>
 #include <vector>
 
+#include <engine/shared/config.h>
+
 using namespace std::chrono_literals;
 
 static int SanitizeAge(std::optional<int64_t> Age)
@@ -416,6 +418,7 @@ void CServerBrowserHttp::Update()
 			log_error("serverbrowser_http", "failed getting serverlist, trying to find best URL");
 			m_pChooseMaster->Reset();
 			m_pChooseMaster->Refresh();
+			m_State = STATE_WANTREFRESH;
 		}
 		else
 		{
@@ -568,7 +571,14 @@ IServerBrowserHttp *CreateServerBrowserHttp(IEngine *pEngine, IStorage *pStorage
 			NumUrls += 1;
 		}
 	}
-	if(NumUrls == 0)
+	if(g_Config.m_ClUseAltServerlist && g_Config.m_ClAltServerlistUrl[0] != '\0')
+	{
+		str_copy(aaUrls[0], g_Config.m_ClAltServerlistUrl);
+		apUrls[0] = aaUrls[0];
+		ppUrls = apUrls;
+		NumUrls = 1;
+	}
+	else if(NumUrls == 0)
 	{
 		ppUrls = DEFAULT_SERVERLIST_URLS;
 		NumUrls = std::size(DEFAULT_SERVERLIST_URLS);

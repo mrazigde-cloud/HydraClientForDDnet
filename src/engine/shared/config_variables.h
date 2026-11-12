@@ -25,6 +25,8 @@ MACRO_CONFIG_INT(ClAntiPingSmooth, cl_antiping_smooth, 0, 0, 1, CFGFLAG_CLIENT |
 MACRO_CONFIG_INT(ClAntiPingGunfire, cl_antiping_gunfire, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Predict gunfire and show predicted weapon physics (with cl_antiping_grenade 1 and cl_antiping_weapons 1)")
 MACRO_CONFIG_INT(ClAntiPingPreInput, cl_antiping_preinput, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Predict other players using preinputs for more accurate input prediction")
 MACRO_CONFIG_INT(ClPredictionMargin, cl_prediction_margin, 10, 1, 300, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Prediction margin in ms (adds latency, can reduce lag from ping jumps)")
+MACRO_CONFIG_INT(ClUseAltServerlist, cl_use_alt_serverlist, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Use third-party server list")
+MACRO_CONFIG_STR(ClAltServerlistUrl, cl_alt_serverlist_url, 256, "https://raw.githubusercontent.com/mrazigde-cloud/ddnet_servers/main/servers.json", CFGFLAG_CLIENT | CFGFLAG_SAVE, "Third-party server list URL")
 MACRO_CONFIG_INT(ClSubTickAiming, cl_sub_tick_aiming, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Send aiming data at sub-tick accuracy")
 #if defined(CONF_PLATFORM_ANDROID) || defined(CONF_PLATFORM_IOS)
 MACRO_CONFIG_INT(ClTouchControls, cl_touch_controls, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Enable ingame touch controls")
@@ -152,11 +154,18 @@ MACRO_CONFIG_INT(ClMapDownloadLowSpeedLimit, cl_map_download_low_speed_limit, 40
 MACRO_CONFIG_INT(ClMapDownloadLowSpeedTime, cl_map_download_low_speed_time, 3, 0, 100000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "HTTP map downloads: Set low speed limit time period (0 to disable)")
 
 MACRO_CONFIG_STR(ClLanguagefile, cl_languagefile, 255, "", CFGFLAG_CLIENT | CFGFLAG_SAVE, "What language file to use")
-MACRO_CONFIG_INT(ClTestClientEmoteCycle, cl_testclient_emote_cycle, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Test client: enable emote cycle on all connections")
-MACRO_CONFIG_INT(ClTestClientEmoteSet, cl_testclient_emote_set, 0, 0, 2, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Test client: emote set (0=positive, 1=angry, 2=custom)")
-MACRO_CONFIG_INT(ClTestClientEmoteCustom1, cl_testclient_emote_custom1, 4, 0, 15, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Test client: custom emote 1")
-MACRO_CONFIG_INT(ClTestClientEmoteCustom2, cl_testclient_emote_custom2, 6, 0, 15, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Test client: custom emote 2")
-MACRO_CONFIG_INT(ClTestClientEmoteCustom3, cl_testclient_emote_custom3, 9, 0, 15, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Test client: custom emote 3")
+MACRO_CONFIG_INT(ClTestClientEmoteCycle, cl_testclient_emote_cycle, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE | CFGFLAG_INSENSITIVE, "Test client: enable emote cycle on all connections")
+MACRO_CONFIG_INT(ClTestClientEmoteDelay, cl_testclient_emote_delay, 100, 5, 10000, CFGFLAG_CLIENT | CFGFLAG_SAVE | CFGFLAG_INSENSITIVE, "Test client: delay between emotes in milliseconds")
+MACRO_CONFIG_INT(ClTestClientEmoteSet, cl_testclient_emote_set, 0, 0, 4, CFGFLAG_CLIENT | CFGFLAG_SAVE | CFGFLAG_INSENSITIVE, "Test client: emote set (0=positive, 1=angry, 2=boring, 3=all, 4=custom)")
+MACRO_CONFIG_INT(ClTestClientEmoteCount, cl_testclient_emote_count, 3, 1, 8, CFGFLAG_CLIENT | CFGFLAG_SAVE | CFGFLAG_INSENSITIVE, "Test client: number of custom emotes")
+MACRO_CONFIG_INT(ClTestClientEmoteCustom1, cl_testclient_emote_custom1, 5, 0, 15, CFGFLAG_CLIENT | CFGFLAG_SAVE | CFGFLAG_INSENSITIVE, "Test client: custom emote 1")
+MACRO_CONFIG_INT(ClTestClientEmoteCustom2, cl_testclient_emote_custom2, 2, 0, 15, CFGFLAG_CLIENT | CFGFLAG_SAVE | CFGFLAG_INSENSITIVE, "Test client: custom emote 2")
+MACRO_CONFIG_INT(ClTestClientEmoteCustom3, cl_testclient_emote_custom3, 14, 0, 15, CFGFLAG_CLIENT | CFGFLAG_SAVE | CFGFLAG_INSENSITIVE, "Test client: custom emote 3")
+MACRO_CONFIG_INT(ClTestClientEmoteCustom4, cl_testclient_emote_custom4, 0, 0, 15, CFGFLAG_CLIENT | CFGFLAG_SAVE | CFGFLAG_INSENSITIVE, "Test client: custom emote 4")
+MACRO_CONFIG_INT(ClTestClientEmoteCustom5, cl_testclient_emote_custom5, 0, 0, 15, CFGFLAG_CLIENT | CFGFLAG_SAVE | CFGFLAG_INSENSITIVE, "Test client: custom emote 5")
+MACRO_CONFIG_INT(ClTestClientEmoteCustom6, cl_testclient_emote_custom6, 0, 0, 15, CFGFLAG_CLIENT | CFGFLAG_SAVE | CFGFLAG_INSENSITIVE, "Test client: custom emote 6")
+MACRO_CONFIG_INT(ClTestClientEmoteCustom7, cl_testclient_emote_custom7, 0, 0, 15, CFGFLAG_CLIENT | CFGFLAG_SAVE | CFGFLAG_INSENSITIVE, "Test client: custom emote 7")
+MACRO_CONFIG_INT(ClTestClientEmoteCustom8, cl_testclient_emote_custom8, 0, 0, 15, CFGFLAG_CLIENT | CFGFLAG_SAVE | CFGFLAG_INSENSITIVE, "Test client: custom emote 8")
 
 // skin loading
 #if defined(CONF_ARCH_IA32)
@@ -367,6 +376,7 @@ MACRO_CONFIG_STR(ClAssetEmoticons, cl_asset_emoticons, 50, "default", CFGFLAG_SA
 MACRO_CONFIG_STR(ClAssetParticles, cl_asset_particles, 50, "default", CFGFLAG_SAVE | CFGFLAG_CLIENT, "The asset for particles")
 MACRO_CONFIG_STR(ClAssetHud, cl_asset_hud, 50, "default", CFGFLAG_SAVE | CFGFLAG_CLIENT, "The asset for HUD")
 MACRO_CONFIG_STR(ClAssetExtras, cl_asset_extras, 50, "default", CFGFLAG_SAVE | CFGFLAG_CLIENT, "The asset for the game graphics that do not come from Teeworlds")
+MACRO_CONFIG_INT(ClExtraAutoSwitch, cl_extra_auto_switch, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Auto switch control to extra on connect");
 
 MACRO_CONFIG_STR(BrFilterString, br_filter_string, 128, "Novice", CFGFLAG_SAVE | CFGFLAG_CLIENT, "Server browser filtering string")
 MACRO_CONFIG_STR(BrExcludeString, br_exclude_string, 128, "", CFGFLAG_SAVE | CFGFLAG_CLIENT, "Server browser exclusion string")

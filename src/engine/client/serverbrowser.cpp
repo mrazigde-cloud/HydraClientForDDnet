@@ -112,6 +112,20 @@ void CServerBrowser::OnInit()
 	m_pHttp = CreateServerBrowserHttp(m_pEngine, m_pStorage, m_pHttpClient, g_Config.m_BrCachedBestServerinfoUrl);
 }
 
+void CServerBrowser::RecreateHttp()
+{
+	if(m_pHttp)
+	{
+		m_pHttp->Shutdown();
+		delete m_pHttp;
+		m_pHttp = nullptr;
+	}
+	m_pHttp = CreateServerBrowserHttp(m_pEngine, m_pStorage, m_pHttpClient, g_Config.m_BrCachedBestServerinfoUrl);
+	m_RefreshingHttp = true;
+	CleanUp();
+	RequestResort();
+}
+
 void CServerBrowser::RegisterCommands()
 {
 	m_pConfigManager->RegisterCallback(CServerBrowser::ConfigSaveCallback, this);

@@ -185,10 +185,10 @@ class CClient : public IClient, public CDemoPlayer::IListener
 		int m_aData[MAX_INPUT_SIZE]; // the input data
 		int m_Tick; // the tick that the input is for
 		int64_t m_PredictedTime; // prediction latency when we sent this input
+		bool m_PredCorrected = false;
 		int64_t m_PredictionMargin; // prediction margin when we sent this input
 		int64_t m_Time;
-	} m_aInputs[NUM_CONNS][200];
-
+	} m_aInputs[NUM_CONNS][200];	
 	int m_aCurrentInput[NUM_CONNS] = {0, 0, 0, 0};
 	bool m_LastDummy = false;
 	bool m_DummySendConnInfo = false;
@@ -357,7 +357,7 @@ public:
 	void SetState(EClientState State);
 
 	// called when the map is loaded and we should init for a new round
-	void OnEnterGame(bool Dummy);
+	void OnEnterGame(int Dummy);
 	void EnterGame(int Conn) override;
 
 	// called once after being ingame for 1 second
@@ -367,6 +367,7 @@ public:
 	void DisconnectWithReason(const char *pReason);
 	void Disconnect() override;
 	void ExtraConnect(int Index, const char *pAddress) override;
+	void SwitchControlToExtra(int Conn);
 	void ExtraDisconnect(int Index) override;
 	static void ConExtra1Connect(IConsole::IResult *pResult, void *pUserData);
 	static void ConExtra2Connect(IConsole::IResult *pResult, void *pUserData);
@@ -427,11 +428,17 @@ public:
 
 	EInfoState InfoState() const override { return m_InfoState; }
 	void RequestDDNetInfo() override;
+	void RecreateServerBrowserHttp() override;
 	void ResetDDNetInfoTask();
 	void LoadDDNetInfo();
 
 	bool IsSixup() const override { return m_Sixup; }
-	bool IsExtraActive() const override { return IClient::IsExtraConn(m_ActiveConn) && g_Config.m_ClDummy == 0; }
+	bool IsExtraActive() const override
+	{
+		if(!IClient::IsExtraConn(m_ActiveConn) || g_Config.m_ClDummy != 0)
+			return false;
+		return const_cast<CNetClient &>(m_aNetClient[m_ActiveConn]).State() == NETSTATE_ONLINE;
+	}
 	int GetExtraClientId() const override { return GameClient()->FindExtraClient(); }
 	int GetActiveExtraIndex() const override { return ActiveExtraIndex(); }
 	bool IsExtraConnOnline(int Conn) override { return IClient::IsExtraConn(Conn) && m_aNetClient[Conn].State() == NETSTATE_ONLINE; }

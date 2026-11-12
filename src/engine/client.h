@@ -367,6 +367,7 @@ public:
 	};
 	virtual EInfoState InfoState() const = 0;
 	virtual void RequestDDNetInfo() = 0;
+	virtual void RecreateServerBrowserHttp() = 0;
 	virtual bool EditorHasUnsavedData() const = 0;
 
 	virtual void GenerateTimeoutSeed() = 0;
@@ -439,6 +440,7 @@ public:
 	virtual int OnSnapInput(int *pData, bool Dummy, bool Force) = 0;
 	virtual void OnDummySwap() = 0;
 	virtual void SendDummyInfo(bool Start) = 0;
+	virtual void ForceSnapInput() = 0;
 
 	virtual int FindExtraClient() const = 0;
 	virtual const char *GetItemName(int Type) const = 0;

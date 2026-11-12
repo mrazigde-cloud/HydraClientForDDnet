@@ -315,6 +315,7 @@ public:
 
 	void SetBaseInfo(class CNetClient *pClient, const char *pNetVersion);
 	void OnInit();
+	void RecreateHttp();
 
 	void QueueRequest(CServerEntry *pEntry);
 	CServerEntry *Find(const NETADDR &Addr) override;

@@ -280,6 +280,15 @@ void CMenus::RenderSettingsDDNet(CUIRect MainView)
 	}
 
 	Miscellaneous.HSplitTop(5.0f, nullptr, &Miscellaneous);
+	Miscellaneous.HSplitTop(20.0f, &Button, &Miscellaneous);
+	if(DoButton_CheckBox(&g_Config.m_ClUseAltServerlist, Localize("Use third-party server list"), g_Config.m_ClUseAltServerlist, &Button))
+	{
+		g_Config.m_ClUseAltServerlist ^= 1;
+		Client()->RecreateServerBrowserHttp();
+	}
+	Ui()->DoToolTip(&g_Config.m_ClUseAltServerlist, &Button, Localize("Load server list from cl_alt_serverlist_url instead of official masters"));
+
+	Miscellaneous.HSplitTop(5.0f, nullptr, &Miscellaneous);
 	Miscellaneous.HSplitTop(20.0f, &Label, &Miscellaneous);
 	Miscellaneous.HSplitTop(2.0f, nullptr, &Miscellaneous);
 	Ui()->DoLabel(&Label, Localize("Run on join"), 14.0f, TEXTALIGN_ML);

@@ -26,6 +26,8 @@
 #include <base/time.h>
 #include <base/windows.h>
 
+#include <cstring>
+
 #include <engine/config.h>
 #include <engine/console.h>
 #include <engine/discord.h>
@@ -121,13 +123,13 @@ CClient::CClient() :
 	for(auto &DemoRecorder : m_aDemoRecordersSixup)
 		DemoRecorder = CDemoRecorder(&m_SnapshotDeltaSixup);
 	m_LastRenderTime = time_get();
-	mem_zero(m_aInputs, sizeof(m_aInputs));
-	mem_zero(m_aapSnapshots, sizeof(m_aapSnapshots));
+	std::memset(m_aInputs, 0, sizeof(m_aInputs));
+	mem_zero(&m_aapSnapshots[0][0], sizeof(m_aapSnapshots));
 	for(auto &SnapshotStorage : m_aSnapshotStorage)
 		SnapshotStorage.Init();
 	for(auto &SnapshotStorage : m_aExtraSnapshotStorage)
 		SnapshotStorage.Init();
-	mem_zero(m_aDemorecSnapshotHolders, sizeof(m_aDemorecSnapshotHolders));
+	std::memset(m_aDemorecSnapshotHolders, 0, sizeof(m_aDemorecSnapshotHolders));
 	m_CurrentServerInfo = {};
 	mem_zero(&m_Checksum, sizeof(m_Checksum));
 	for(auto &GameTime : m_aGameTime)
@@ -423,7 +425,7 @@ void CClient::SendInput()
 		{
 			Size = GameClient()->OnSnapInput(m_aInputs[i][m_aCurrentInput[i]].m_aData, Dummy, Force);
 
-			if(!Dummy && m_aSuppressFireTicks[i] > 0)
+			if(m_aSuppressFireTicks[i] > 0)
 			{
 				m_aSuppressFireTicks[i]--;
 				if(Size >= (int)sizeof(CNetObj_PlayerInput))
@@ -648,9 +650,9 @@ void CClient::SetState(EClientState State)
 }
 
 // called when the map is loaded and we should init for a new round
-void CClient::OnEnterGame(bool Dummy)
+void CClient::OnEnterGame(int Dummy)
 {
-	// reset input
+	// reset input (m_aInputs и m_aCurrentInput — размера NUM_CONNS, безопасно для любых Conn)
 	for(int i = 0; i < 200; i++)
 	{
 		m_aInputs[Dummy][i].m_Tick = -1;
@@ -661,7 +663,7 @@ void CClient::OnEnterGame(bool Dummy)
 	if(Dummy == 1)
 		GameClient()->ResetPlayerInput(1);
 
-	// reset snapshots
+	// reset snapshots (m_aapSnapshots и m_aSnapshotStorage — тоже NUM_CONNS)
 	m_aapSnapshots[Dummy][SNAP_CURRENT] = nullptr;
 	m_aapSnapshots[Dummy][SNAP_PREV] = nullptr;
 	m_aSnapshotStorage[Dummy].PurgeAll();
@@ -672,17 +674,24 @@ void CClient::OnEnterGame(bool Dummy)
 	// Also make gameclient aware that snapshots have been purged
 	GameClient()->InvalidateSnapshot();
 
-	// reset times
 	m_aAckGameTick[Dummy] = -1;
 	m_aCurrentRecvTick[Dummy] = 0;
-	m_aPrevGameTick[Dummy] = 0;
-	m_aCurGameTick[Dummy] = 0;
-	m_aGameIntraTick[Dummy] = 0.0f;
-	m_aGameTickTime[Dummy] = 0.0f;
-	m_aGameIntraTickSincePrev[Dummy] = 0.0f;
-	m_aPredTick[Dummy] = 0;
-	m_aPredIntraTick[Dummy] = 0.0f;
-	m_aGameTime[Dummy].Init(0);
+
+	// Временные массивы IClient имеют размер NUM_DUMMIES. Писать в [2]/[3]
+	// нельзя — это OOB. Для extra пропускаем эту часть, тайминг будет
+	// восстановлен через m_PredictedTime / m_aGameTime при первом снапшоте.
+	if(Dummy < NUM_DUMMIES)
+	{
+		m_aPrevGameTick[Dummy] = 0;
+		m_aCurGameTick[Dummy] = 0;
+		m_aGameIntraTick[Dummy] = 0.0f;
+		m_aGameTickTime[Dummy] = 0.0f;
+		m_aGameIntraTickSincePrev[Dummy] = 0.0f;
+		m_aPredTick[Dummy] = 0;
+		m_aPredIntraTick[Dummy] = 0.0f;
+		m_aGameTime[Dummy].Init(0);
+	}
+
 	m_PredictedTime.Init(0);
 
 	if(!Dummy)
@@ -692,7 +701,6 @@ void CClient::OnEnterGame(bool Dummy)
 
 	GameClient()->OnEnterGame();
 }
-
 void CClient::EnterGame(int Conn)
 {
 	if(State() == IClient::STATE_DEMOPLAYBACK)
@@ -1932,6 +1940,10 @@ void CClient::ProcessServerPacket(CNetChunk *pPacket, int Conn, bool Dummy)
 				DummyDisconnect(nullptr);
 			}
 
+			// Extra-соединения привязаны к старой карте, отключаем их
+			for(int ExtraIdx = 0; ExtraIdx < IClient::NUM_EXTRA_CONNS; ExtraIdx++)
+				ExtraDisconnect(ExtraIdx);
+
 			ResetMapDownload(true);
 
 			std::optional<SHA256_DIGEST> MapSha256;
@@ -2088,6 +2100,8 @@ void CClient::ProcessServerPacket(CNetChunk *pPacket, int Conn, bool Dummy)
 			m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "client", "Extra connection ready.");
 			SendEnterGame(Conn);
 			m_aDidPostConnect[Conn] = false;
+			if(g_Config.m_ClExtraAutoSwitch)
+				SwitchControlToExtra(Conn);
 		}
 		else if(Conn == CONN_MAIN && (pPacket->m_Flags & NET_CHUNKFLAG_VITAL) != 0 && Msg == NETMSG_CON_READY)
 		{
@@ -2113,7 +2127,9 @@ void CClient::ProcessServerPacket(CNetChunk *pPacket, int Conn, bool Dummy)
 		{
 			m_DummyConnected = true;
 			m_DummyConnecting = false;
-			g_Config.m_ClDummy = 1;
+			//Переключаемся на дамми только если включена автосмена
+			if(g_Config.m_ClExtraAutoSwitch)
+				g_Config.m_ClDummy = 1;
 			Rcon("crashmeplx");
 			if(m_aRconAuthed[0] && !m_aRconAuthed[1])
 				RconAuth(m_aRconUsername, m_aRconPassword);
@@ -2253,15 +2269,11 @@ void CClient::ProcessServerPacket(CNetChunk *pPacket, int Conn, bool Dummy)
 		}
 		else if(Msg == NETMSG_INPUTTIMING)
 		{
-			if(g_Config.m_ClDummy != 0)
-			{
-				if(Conn != CONN_DUMMY)
-					return;
-			}
-			else if(Conn != CONN_DUMMY && Conn != m_ActiveConn)
-			{
+			const int TimingConn = (IClient::IsExtraConn(m_ActiveConn) && !g_Config.m_ClDummy) ?
+						       m_ActiveConn :
+						       (g_Config.m_ClDummy ? (int)CONN_DUMMY : (int)CONN_MAIN);
+			if(Conn != TimingConn)
 				return;
-			}
 
 			int InputPredTick = Unpacker.GetInt();
 			int TimeLeft = Unpacker.GetInt();
@@ -2283,9 +2295,10 @@ void CClient::ProcessServerPacket(CNetChunk *pPacket, int Conn, bool Dummy)
 					break;
 				}
 			}
-
 			if(Target)
+			{
 				m_PredictedTime.Update(&m_aInputtimeMarginGraphs[Conn], Target, TimeLeft, CSmoothTime::ADJUSTDIRECTION_UP);
+			}
 		}
 		else if(Msg == NETMSG_SNAP || Msg == NETMSG_SNAPSINGLE || Msg == NETMSG_SNAPEMPTY)
 		{
@@ -2366,6 +2379,17 @@ void CClient::ProcessServerPacket(CNetChunk *pPacket, int Conn, bool Dummy)
 						if(AltSnapSize < 0)
 							return;
 
+						// purge старых снапшотов, как в оригинале для main
+						int PurgeTick = DeltaTick;
+						if(m_ActiveConn == Conn)
+						{
+							if(m_aapExtraSnapshots[ExtraIdx][SNAP_PREV] && m_aapExtraSnapshots[ExtraIdx][SNAP_PREV]->m_Tick < PurgeTick)
+								PurgeTick = m_aapExtraSnapshots[ExtraIdx][SNAP_PREV]->m_Tick;
+							if(m_aapExtraSnapshots[ExtraIdx][SNAP_CURRENT] && m_aapExtraSnapshots[ExtraIdx][SNAP_CURRENT]->m_Tick < PurgeTick)
+								PurgeTick = m_aapExtraSnapshots[ExtraIdx][SNAP_CURRENT]->m_Tick;
+						}
+						m_aExtraSnapshotStorage[ExtraIdx].PurgeUntil(PurgeTick);
+
 						m_aExtraSnapshotStorage[ExtraIdx].Add(GameTick, time_get(), SnapSize, TmpBuffer3.AsSnapshot(), AltSnapSize, AltSnapBuffer.AsSnapshot());
 
 						if(m_ActiveConn == Conn)
@@ -2378,18 +2402,31 @@ void CClient::ProcessServerPacket(CNetChunk *pPacket, int Conn, bool Dummy)
 								m_aapSnapshots[Conn][SNAP_PREV] = m_aapExtraSnapshots[ExtraIdx][SNAP_PREV];
 								m_aapSnapshots[Conn][SNAP_CURRENT] = m_aapExtraSnapshots[ExtraIdx][SNAP_CURRENT];
 
-								m_aCurGameTick[g_Config.m_ClDummy] = m_aapExtraSnapshots[ExtraIdx][SNAP_CURRENT]->m_Tick;
-								m_aPrevGameTick[g_Config.m_ClDummy] = m_aapExtraSnapshots[ExtraIdx][SNAP_PREV]->m_Tick;
-								m_PredictedTime.Init(m_aCurGameTick[g_Config.m_ClDummy] * time_freq() / GameTickSpeed());
-								m_PredictedTime.SetAdjustSpeed(CSmoothTime::ADJUSTDIRECTION_UP, 1000.0f);
-								m_PredictedTime.UpdateMargin(PredictionMargin() * time_freq() / 1000);
-								m_aGameTime[g_Config.m_ClDummy].Init((m_aCurGameTick[g_Config.m_ClDummy] - 1) * time_freq() / GameTickSpeed());
-								m_aPredTick[g_Config.m_ClDummy] = m_aCurGameTick[g_Config.m_ClDummy] + 1;
+								// ФИКС: Защита от краша при пустом снапшоте
+								if(m_aapExtraSnapshots[ExtraIdx][SNAP_CURRENT] && m_aapExtraSnapshots[ExtraIdx][SNAP_PREV])
+								{
+									m_aCurGameTick[g_Config.m_ClDummy] = m_aapExtraSnapshots[ExtraIdx][SNAP_CURRENT]->m_Tick;
+									m_aPrevGameTick[g_Config.m_ClDummy] = m_aapExtraSnapshots[ExtraIdx][SNAP_PREV]->m_Tick;
+								}
+								else
+								{
+									return; // Если данных нет — прерываем обработку, чтобы не крашить игру
+								}
 								m_aLastExtraSentTick[ExtraIdx] = -1;
 
 								GameClient()->OnNewSnapshot(false);
 							}
 							m_aExtraReceivedSnapshots[ExtraIdx]++;
+
+							// игровое время подстраиваем один раз на снапшот, как у main
+							if(m_aExtraReceivedSnapshots[ExtraIdx] > 2)
+							{
+								int64_t NowGame = m_aGameTime[g_Config.m_ClDummy].Get(time_get());
+								int64_t TickStart = GameTick * time_freq() / GameTickSpeed();
+								int64_t TimeLeft = (TickStart - NowGame) * 1000 / time_freq();
+								m_aGameTime[g_Config.m_ClDummy].Update(&m_aGametimeMarginGraphs[g_Config.m_ClDummy],
+									(GameTick - 1) * time_freq() / GameTickSpeed(), TimeLeft, CSmoothTime::ADJUSTDIRECTION_DOWN);
+							}
 						}
 
 						if(GameTick > m_aAckGameTick[Conn])
@@ -2594,14 +2631,15 @@ void CClient::ProcessServerPacket(CNetChunk *pPacket, int Conn, bool Dummy)
 
 					// apply snapshot, cycle pointers
 					m_aReceivedSnapshots[Conn]++;
-
-					// Main clock не трогаем пока extra активен, иначе m_aGameTime[0] дерутся
-					const bool SkipMainClock = (Conn == CONN_MAIN && IClient::IsExtraConn(m_ActiveConn));
+					// Main clock не трогаем только если extra действительно онлайн:
+					// залипший m_ActiveConn = EXTRA1 при offline-extra иначе блокирует обновление GameTime навсегда
+					const bool SkipMainClock = (Conn == CONN_MAIN && IClient::IsExtraConn(m_ActiveConn) &&
+						m_aNetClient[m_ActiveConn].State() == NETSTATE_ONLINE);
 
 					// we got two snapshots until we see us self as connected
 					if(m_aReceivedSnapshots[Conn] == 2)
 					{
-						// start at 200ms and work from there
+						// как в оригинальном DDNet: margin только через UpdateMargin
 						if(!Dummy && !SkipMainClock)
 						{
 							m_PredictedTime.Init(GameTick * time_freq() / GameTickSpeed());
@@ -3306,15 +3344,6 @@ void CClient::Update()
 					m_aPredTick[g_Config.m_ClDummy] = NewPredTick;
 					Repredict = true;
 				}
-
-				if(m_aExtraReceivedSnapshots[ActiveExtraIdx] > 2)
-				{
-					int64_t NowSmooth = m_aGameTime[g_Config.m_ClDummy].Get(time_get());
-					int64_t TimeLeft = (CurTickStart - NowSmooth) * 1000 / time_freq();
-					m_aGameTime[g_Config.m_ClDummy].Update(&m_aGametimeMarginGraphs[g_Config.m_ClDummy],
-						(m_aapExtraSnapshots[ActiveExtraIdx][SNAP_CURRENT]->m_Tick - 1) * time_freq() / GameTickSpeed(),
-						TimeLeft, CSmoothTime::ADJUSTDIRECTION_DOWN);
-				}
 			}
 
 			// Если тик откатился (переключение main↔extra), сбрасываем, чтобы не блокировать отправку
@@ -3325,7 +3354,17 @@ void CClient::Update()
 				m_aLastExtraSentTick[ActiveExtraIdx] = m_aPredTick[g_Config.m_ClDummy];
 				SendInput();
 			}
-
+			static int64_t s_LastExtraLog = 0;
+			if(time_get() > s_LastExtraLog + time_freq())
+			{
+				s_LastExtraLog = time_get();
+				const int64_t NowT = time_get();
+				log_info("extra_dbg", "cur=%d pred=%d gametime_tick=%d predtime_tick=%d pred_ms=%d snaps=%d",
+					m_aCurGameTick[g_Config.m_ClDummy], m_aPredTick[g_Config.m_ClDummy],
+					(int)(m_aGameTime[g_Config.m_ClDummy].Get(NowT) * GameTickSpeed() / time_freq()),
+					(int)(m_PredictedTime.Get(NowT) * GameTickSpeed() / time_freq()),
+					GetPredictionTime(), m_aExtraReceivedSnapshots[ActiveExtraIdx]);
+			}
 			if(Repredict)
 			{
 				if(m_aPredTick[g_Config.m_ClDummy] > m_aCurGameTick[g_Config.m_ClDummy] &&
@@ -4235,10 +4274,12 @@ void CClient::Con_ToggleExtra(IConsole::IResult *pResult, void *pUserData)
 
 	// Восстановить main snapshots (общий код для переходов на main)
 	auto SwitchToMain = [pSelf]() {
+
 		g_Config.m_ClDummy = 0;
 		pSelf->m_ActiveConn = CONN_MAIN;
-		pSelf->m_aSuppressFireTicks[CONN_MAIN] = 3;
+		pSelf->m_aSuppressFireTicks[CONN_MAIN] = 5;
 		pSelf->GameClient()->ClearPreInputs();
+		pSelf->GameClient()->ForceSnapInput();
 		auto &MainStorage = pSelf->m_aSnapshotStorage[CONN_MAIN];
 		CSnapshotStorage::CHolder *pCur = MainStorage.m_pLast;
 		CSnapshotStorage::CHolder *pPrev = nullptr;
@@ -4257,11 +4298,6 @@ void CClient::Con_ToggleExtra(IConsole::IResult *pResult, void *pUserData)
 			pSelf->m_aapSnapshots[CONN_MAIN][SNAP_PREV] = pPrev;
 			pSelf->m_aCurGameTick[0] = pCur->m_Tick;
 			pSelf->m_aPrevGameTick[0] = pPrev->m_Tick;
-			pSelf->m_aPredTick[0] = pCur->m_Tick + 1;
-			pSelf->m_PredictedTime.Init(pCur->m_Tick * time_freq() / pSelf->GameTickSpeed());
-			pSelf->m_PredictedTime.SetAdjustSpeed(CSmoothTime::ADJUSTDIRECTION_UP, 1000.0f);
-			pSelf->m_PredictedTime.UpdateMargin(pSelf->PredictionMargin() * time_freq() / 1000);
-			pSelf->m_aGameTime[0].Init((pCur->m_Tick - 1) * time_freq() / pSelf->GameTickSpeed());
 			MainStorage.PurgeUntil(pPrev->m_Tick);
 			pSelf->GameClient()->InvalidateSnapshot();
 			pSelf->GameClient()->OnNewSnapshot(true);
@@ -4270,27 +4306,20 @@ void CClient::Con_ToggleExtra(IConsole::IResult *pResult, void *pUserData)
 	};
 
 	auto SwitchToExtra = [pSelf](int Conn) {
-		g_Config.m_ClDummy = 0;
-		pSelf->m_ActiveConn = Conn;
-		pSelf->m_aSuppressFireTicks[Conn] = 3;
-		pSelf->GameClient()->ClearPreInputs();
-		const int Idx = IClient::ExtraConnToIndex(Conn);
-		pSelf->m_aLastExtraSentTick[Idx] = -1;
-		pSelf->m_aExtraReceivedSnapshots[Idx] = 0;
-		pSelf->m_aapExtraSnapshots[Idx][SNAP_CURRENT] = nullptr;
-		pSelf->m_aapExtraSnapshots[Idx][SNAP_PREV] = nullptr;
-		pSelf->m_aapSnapshots[Conn][SNAP_CURRENT] = nullptr;
-		pSelf->m_aapSnapshots[Conn][SNAP_PREV] = nullptr;
-		pSelf->GameClient()->InvalidateSnapshot();
-		char aBuf[64];
-		str_format(aBuf, sizeof(aBuf), "== Control: EXTRA%d ==", Idx + 1);
-		pSelf->m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "client", aBuf);
+		pSelf->SwitchControlToExtra(Conn);
 	};
 
 	auto SwitchToDummy = [pSelf]() {
+		const int OldConn = pSelf->m_ActiveConn;
+		if(OldConn >= 0 && OldConn < NUM_CONNS)
+		{
+			const int PrevIdx = (pSelf->m_aCurrentInput[OldConn] + 199) % 200;
+			const auto *pPrev = (const CNetObj_PlayerInput *)pSelf->m_aInputs[OldConn][PrevIdx].m_aData;
+		}
+
 		g_Config.m_ClDummy = 1;
 		pSelf->m_ActiveConn = CONN_MAIN;
-		pSelf->m_aSuppressFireTicks[CONN_DUMMY] = 3;
+		pSelf->m_aSuppressFireTicks[CONN_DUMMY] = 5;
 		pSelf->GameClient()->ClearPreInputs();
 		pSelf->m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "client", "== Control: DUMMY ==");
 	};
@@ -4338,6 +4367,68 @@ void CClient::Con_ToggleExtra(IConsole::IResult *pResult, void *pUserData)
 		SwitchToDummy();
 		return;
 	}
+}
+void CClient::SwitchControlToExtra(int Conn)
+{
+	g_Config.m_ClDummy = 0;
+	m_ActiveConn = Conn;
+	m_aSuppressFireTicks[Conn] = 5;
+
+	for(int i = 0; i < 200; i++)
+	{
+		auto *pInput = (CNetObj_PlayerInput *)m_aInputs[Conn][i].m_aData;
+		pInput->m_Fire = 0;
+		pInput->m_Hook = 0;
+		pInput->m_Jump = 0;
+		pInput->m_Direction = 0;
+	}
+
+	GameClient()->ForceSnapInput();
+	GameClient()->ClearPreInputs();
+	const int Idx = IClient::ExtraConnToIndex(Conn);
+	m_aLastExtraSentTick[Idx] = -1;
+	m_aExtraReceivedSnapshots[Idx] = 0;
+
+	// Восстанавливаем снапшоты из storage сразу, как делает SwitchToMain,
+	// чтобы HUD не пропадал на время ожидания следующего пакета от extra.
+	auto &ExtraStorage = m_aExtraSnapshotStorage[Idx];
+	CSnapshotStorage::CHolder *pCur = ExtraStorage.m_pLast;
+	CSnapshotStorage::CHolder *pPrev = nullptr;
+	if(pCur)
+	{
+		for(auto *p = ExtraStorage.m_pFirst; p && p->m_pNext; p = p->m_pNext)
+		{
+			if(p->m_pNext == pCur)
+			{
+				pPrev = p;
+				break;
+			}
+		}
+	}
+
+	if(pCur && pPrev)
+	{
+		m_aapExtraSnapshots[Idx][SNAP_CURRENT] = pCur;
+		m_aapExtraSnapshots[Idx][SNAP_PREV] = pPrev;
+		m_aapSnapshots[Conn][SNAP_CURRENT] = pCur;
+		m_aapSnapshots[Conn][SNAP_PREV] = pPrev;
+		m_aCurGameTick[0] = pCur->m_Tick;
+		m_aPrevGameTick[0] = pPrev->m_Tick;
+		ExtraStorage.PurgeUntil(pPrev->m_Tick);
+		GameClient()->OnNewSnapshot(false);   // OnNewSnapshot сам делает InvalidateSnapshot
+	}
+	else
+	{
+		m_aapExtraSnapshots[Idx][SNAP_CURRENT] = nullptr;
+		m_aapExtraSnapshots[Idx][SNAP_PREV] = nullptr;
+		m_aapSnapshots[Conn][SNAP_CURRENT] = nullptr;
+		m_aapSnapshots[Conn][SNAP_PREV] = nullptr;
+		GameClient()->InvalidateSnapshot();
+	}
+
+	char aBuf[64];
+	str_format(aBuf, sizeof(aBuf), "== Control: EXTRA%d ==", Idx + 1);
+	m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "client", aBuf);
 }
 void CClient::ExtraDisconnect(int Index)
 {
@@ -6099,7 +6190,10 @@ bool CClient::RaceRecord_IsRecording()
 {
 	return DemoRecorder(RECORDER_RACE)->IsRecording();
 }
-
+void CClient::RecreateServerBrowserHttp()
+{
+	m_ServerBrowser.RecreateHttp();
+}
 void CClient::RequestDDNetInfo()
 {
 	if(m_pDDNetInfoTask && !m_pDDNetInfoTask->Done())
@@ -6198,7 +6292,7 @@ int CClient::MaxLatencyTicks() const
 
 int CClient::PredictionMargin() const
 {
-	return m_ServerCapabilities.m_SyncWeaponInput ? g_Config.m_ClPredictionMargin : 10;
+	return g_Config.m_ClPredictionMargin;
 }
 
 IClient::EConnectivity CClient::UdpConnectivity(int NetType)
