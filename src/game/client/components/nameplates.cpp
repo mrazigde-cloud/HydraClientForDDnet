@@ -659,7 +659,7 @@ void CNamePlates::RenderNamePlateGame(vec2 Position, const CNetObj_PlayerInfo *p
 	Data.m_FontSizeDirection = 18.0f + 20.0f * g_Config.m_ClDirectionSize / 100.0f;
 
 	if(g_Config.m_ClNamePlatesAlways == 0)
-		Alpha *= std::clamp(1.0f - std::pow(distance(GameClient()->m_Controls.m_aTargetPos[g_Config.m_ClDummy], Position) / 200.0f, 16.0f), 0.0f, 1.0f);
+		Alpha *= std::clamp(1.0f - std::pow(distance(GameClient()->m_Controls.m_aTargetPos[GameClient()->m_Controls.ActiveSlot()], Position) / 200.0f, 16.0f), 0.0f, 1.0f);
 	if(OtherTeam)
 		Alpha *= (float)g_Config.m_ClShowOthersAlpha / 100.0f;
 
@@ -717,7 +717,7 @@ void CNamePlates::RenderNamePlateGame(vec2 Position, const CNetObj_PlayerInfo *p
 		}
 		else if(Client()->State() != IClient::STATE_DEMOPLAYBACK && pPlayerInfo->m_Local) // Always render local input when not in demo playback
 		{
-			const auto &InputData = GameClient()->m_Controls.m_aInputData[g_Config.m_ClDummy];
+			const auto &InputData = GameClient()->m_Controls.m_aInputData[GameClient()->m_Controls.ActiveSlot()];
 			Data.m_DirLeft = InputData.m_Direction == -1;
 			Data.m_DirJump = InputData.m_Jump == 1;
 			Data.m_DirRight = InputData.m_Direction == 1;

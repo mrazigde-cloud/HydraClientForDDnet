@@ -1,5 +1,7 @@
 /* (c) Magnus Auvinen. See licence.txt in the root of the distribution for more information. */
 /* If you are missing that file, acquire a complete release at teeworlds.com.                */
+#include <game/client/ui_scrollregion.h>
+
 #include "menus.h"
 
 #include <base/dbg.h>
@@ -14,6 +16,7 @@
 #include <game/client/gameclient.h>
 #include <game/client/ui.h>
 #include <game/localization.h>
+#include <game/client/ui_listbox.h>
 
 void CMenus::SetNeedSendInfo()
 {
@@ -411,9 +414,27 @@ bool CMenus::RenderHslaScrollbars(CUIRect *pRect, unsigned int *pColor, bool Alp
 void CMenus::RenderSettingsTestClient(CUIRect MainView)
 {
 	CUIRect Label, Button, Left, Right, Middle;
+
+	// Создаем область прокрутки для всей страницы
+	static CScrollRegion s_ScrollRegion;
+	CScrollRegionParams ScrollParams;
+	ScrollParams.m_ScrollUnit = 60.0f; // Скорость прокрутки колесиком
+	s_ScrollRegion.Begin(&MainView, &ScrollParams);
+	// MainView уже автоматически сдвинут вниз на нужную позицию!
+
+	// Отступ сверху
 	MainView.HSplitTop(10.0f, nullptr, &MainView);
 
-	// Enable toggle
+	// === ГАЛОЧКА АВТО-ПЕРЕКЛЮЧЕНИЯ ===
+	MainView.HSplitTop(20.0f, &Button, &MainView);
+	s_ScrollRegion.AddRect(Button); // Сообщаем скроллу о кнопке
+	static CButtonContainer s_ExtraAutoSwitchCheckbox;
+	if(DoButton_CheckBox(&s_ExtraAutoSwitchCheckbox, Localize("Auto switch to Dummy/Extra on connect"), g_Config.m_ClExtraAutoSwitch, &Button))
+		g_Config.m_ClExtraAutoSwitch ^= 1;
+	Ui()->DoToolTip(&g_Config.m_ClExtraAutoSwitch, &Button, Localize("Automatically switch camera to Dummy or Extra connections when they join"));
+	// =====================================
+
+	// Enable toggle (Emote cycle)
 	MainView.HSplitTop(20.0f, &Button, &MainView);
 	static CButtonContainer s_EmoteCycleCheckbox;
 	if(DoButton_CheckBox(&s_EmoteCycleCheckbox, Localize("Emote cycle"), g_Config.m_ClTestClientEmoteCycle, &Button))
@@ -422,19 +443,31 @@ void CMenus::RenderSettingsTestClient(CUIRect MainView)
 	// Description
 	MainView.HSplitTop(8.0f, nullptr, &MainView);
 	MainView.HSplitTop(16.0f, &Label, &MainView);
+	s_ScrollRegion.AddRect(Label);
 	TextRender()->TextColor(0.7f, 0.7f, 0.7f, 1.0f);
-	Ui()->DoLabel(&Label, Localize("Sends emotes on all connections (main, dummy, extra1, extra2) in order"), 12.0f, TEXTALIGN_ML);
+	Ui()->DoLabel(&Label, Localize("Sends the same emote to all connections simultaneously"), 12.0f, TEXTALIGN_ML);
 	TextRender()->TextColor(TextRender()->DefaultTextColor());
+
+	// Слайдер задержки (появляется только если цикл включен)
+	if(g_Config.m_ClTestClientEmoteCycle)
+	{
+		MainView.HSplitTop(4.0f, nullptr, &MainView);
+		MainView.HSplitTop(20.0f, &Button, &MainView);
+		s_ScrollRegion.AddRect(Button);
+		Ui()->DoScrollbarOption(&g_Config.m_ClTestClientEmoteDelay, &g_Config.m_ClTestClientEmoteDelay, &Button, Localize("Delay between emotes"), 5, 10000, &CUi::ms_LinearScrollbarScale, 0u, " ms");
+	}
 
 	// Copy moves toggle
 	MainView.HSplitTop(12.0f, nullptr, &MainView);
 	MainView.HSplitTop(20.0f, &Button, &MainView);
+	s_ScrollRegion.AddRect(Button);
 	static CButtonContainer s_CopyAllCheckbox;
 	if(DoButton_CheckBox(&s_CopyAllCheckbox, Localize("All connections copy moves"), g_Config.m_ClDummyCopyMoves, &Button))
 		g_Config.m_ClDummyCopyMoves ^= 1;
 
 	MainView.HSplitTop(4.0f, nullptr, &MainView);
 	MainView.HSplitTop(16.0f, &Label, &MainView);
+	s_ScrollRegion.AddRect(Label);
 	TextRender()->TextColor(0.7f, 0.7f, 0.7f, 1.0f);
 	Ui()->DoLabel(&Label, Localize("All characters (main, dummy, extra1, extra2) receive the same input simultaneously"), 11.0f, TEXTALIGN_ML);
 	TextRender()->TextColor(TextRender()->DefaultTextColor());
@@ -442,6 +475,7 @@ void CMenus::RenderSettingsTestClient(CUIRect MainView)
 	// Connections section
 	MainView.HSplitTop(20.0f, nullptr, &MainView);
 	MainView.HSplitTop(20.0f, &Label, &MainView);
+	s_ScrollRegion.AddRect(Label);
 	Ui()->DoLabel(&Label, Localize("Connections"), 14.0f, TEXTALIGN_ML);
 
 	static CButtonContainer s_aConnButtons[3];
@@ -462,6 +496,7 @@ void CMenus::RenderSettingsTestClient(CUIRect MainView)
 	{
 		MainView.HSplitTop(4.0f, nullptr, &MainView);
 		MainView.HSplitTop(24.0f, &Button, &MainView);
+		s_ScrollRegion.AddRect(Button);
 
 		CUIRect StatusRect;
 		Button.VSplitRight(140.0f, &StatusRect, &Button);
@@ -515,66 +550,124 @@ void CMenus::RenderSettingsTestClient(CUIRect MainView)
 	// Set selection row
 	MainView.HSplitTop(20.0f, nullptr, &MainView);
 	MainView.HSplitTop(20.0f, &Label, &MainView);
+	s_ScrollRegion.AddRect(Label);
 	Ui()->DoLabel(&Label, Localize("Emote set"), 14.0f, TEXTALIGN_ML);
 
-	static CButtonContainer s_SetButtons[3];
+	static CButtonContainer s_SetButtons[5];
 
 	MainView.HSplitTop(6.0f, nullptr, &MainView);
 	MainView.HSplitTop(24.0f, &Button, &MainView);
-	Button.VSplitLeft(Button.w / 3.0f - 4.0f, &Left, &Button);
-	Button.VSplitLeft(Button.w / 2.0f - 2.0f, &Middle, &Right);
-	if(DoButton_Menu(&s_SetButtons[0], Localize("Positive"), g_Config.m_ClTestClientEmoteSet == 0, &Left))
-		g_Config.m_ClTestClientEmoteSet = 0;
-	if(DoButton_Menu(&s_SetButtons[1], Localize("Angry"), g_Config.m_ClTestClientEmoteSet == 1, &Middle))
-		g_Config.m_ClTestClientEmoteSet = 1;
-	if(DoButton_Menu(&s_SetButtons[2], Localize("Custom"), g_Config.m_ClTestClientEmoteSet == 2, &Right))
-		g_Config.m_ClTestClientEmoteSet = 2;
+	s_ScrollRegion.AddRect(Button);
+
+	float ButtonWidth = (Button.w - 4 * 4.0f) / 5.0f;
+	for(int i = 0; i < 5; i++)
+	{
+		CUIRect Btn;
+		Button.VSplitLeft(ButtonWidth, &Btn, &Button);
+		if(i < 4) Button.VSplitLeft(4.0f, nullptr, &Button);
+
+		const char *pName = "";
+		if(i == 0) pName = Localize("Positive");
+		else if(i == 1) pName = Localize("Angry");
+		else if(i == 2) pName = Localize("Boring");
+		else if(i == 3) pName = Localize("All");
+		else if(i == 4) pName = Localize("Custom");
+
+		if(DoButton_Menu(&s_SetButtons[i], pName, g_Config.m_ClTestClientEmoteSet == i, &Btn))
+			g_Config.m_ClTestClientEmoteSet = i;
+	}
+
+	const int SetIdx = std::clamp(g_Config.m_ClTestClientEmoteSet, 0, 4);
+
+	// Кнопки для добавления/удаления эмоций (только в режиме Custom)
+	if(SetIdx == 4)
+	{
+		MainView.HSplitTop(10.0f, nullptr, &MainView);
+		MainView.HSplitTop(24.0f, &Button, &MainView);
+		s_ScrollRegion.AddRect(Button);
+
+		CUIRect MinusBtn, PlusBtn, LabelRect;
+		Button.VSplitLeft(24.0f, &MinusBtn, &Button);
+		Button.VSplitRight(24.0f, &PlusBtn, &LabelRect);
+
+		static CButtonContainer s_MinusBtn;
+		static CButtonContainer s_PlusBtn;
+
+		if(DoButton_Menu(&s_MinusBtn, "-", 0, &MinusBtn) && g_Config.m_ClTestClientEmoteCount > 1)
+			g_Config.m_ClTestClientEmoteCount--;
+		if(DoButton_Menu(&s_PlusBtn, "+", 0, &PlusBtn) && g_Config.m_ClTestClientEmoteCount < 8)
+			g_Config.m_ClTestClientEmoteCount++;
+	}
 
 	// Preview / custom pickers
-	MainView.HSplitTop(30.0f, nullptr, &MainView);
+	MainView.HSplitTop(20.0f, nullptr, &MainView);
 	MainView.HSplitTop(20.0f, &Label, &MainView);
-	Ui()->DoLabel(&Label, g_Config.m_ClTestClientEmoteSet == 2 ? Localize("Custom emotes (click arrows to change)") : Localize("Preview"), 14.0f, TEXTALIGN_ML);
+	s_ScrollRegion.AddRect(Label);
+	Ui()->DoLabel(&Label, g_Config.m_ClTestClientEmoteSet == 2 ? Localize("Custom emotes") : Localize("Preview"), 14.0f, TEXTALIGN_ML);
 
 	static const int s_aEmoteSets[3][3] = {
 		{5, 2, 14},
 		{9, 10, 11},
-		{0, 0, 0},
+		{3, 4, 12},
 	};
+	static const int s_aAllEmotes[16] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
 
-	const int SetIdx = std::clamp(g_Config.m_ClTestClientEmoteSet, 0, 2);
-	int aCustomEmotes[3] = {
+	int aCustomEmotes[8] = {
 		std::clamp(g_Config.m_ClTestClientEmoteCustom1, 0, 15),
 		std::clamp(g_Config.m_ClTestClientEmoteCustom2, 0, 15),
 		std::clamp(g_Config.m_ClTestClientEmoteCustom3, 0, 15),
+		std::clamp(g_Config.m_ClTestClientEmoteCustom4, 0, 15),
+		std::clamp(g_Config.m_ClTestClientEmoteCustom5, 0, 15),
+		std::clamp(g_Config.m_ClTestClientEmoteCustom6, 0, 15),
+		std::clamp(g_Config.m_ClTestClientEmoteCustom7, 0, 15),
+		std::clamp(g_Config.m_ClTestClientEmoteCustom8, 0, 15),
 	};
-	const int *pEmotes = SetIdx == 2 ? aCustomEmotes : s_aEmoteSets[SetIdx];
 
-	int *apCustomVars[3] = {
+	const int *pEmotes = nullptr;
+	int NumEmotesToShow = 3;
+
+	if(SetIdx <= 2)
+	{
+		pEmotes = s_aEmoteSets[SetIdx];
+	}
+	else if(SetIdx == 3)
+	{
+		pEmotes = s_aAllEmotes;
+		NumEmotesToShow = 16;
+	}
+	else if(SetIdx == 4)
+	{
+		pEmotes = aCustomEmotes;
+		NumEmotesToShow = g_Config.m_ClTestClientEmoteCount;
+	}
+
+	int *apCustomVars[8] = {
 		&g_Config.m_ClTestClientEmoteCustom1,
 		&g_Config.m_ClTestClientEmoteCustom2,
 		&g_Config.m_ClTestClientEmoteCustom3,
+		&g_Config.m_ClTestClientEmoteCustom4,
+		&g_Config.m_ClTestClientEmoteCustom5,
+		&g_Config.m_ClTestClientEmoteCustom6,
+		&g_Config.m_ClTestClientEmoteCustom7,
+		&g_Config.m_ClTestClientEmoteCustom8,
 	};
 
-	static CButtonContainer s_aLeftBtn[3];
-	static CButtonContainer s_aRightBtn[3];
-
-	for(int i = 0; i < 3; i++)
+	// Список эмоций напрямую (без CListBox)
+	for(int i = 0; i < NumEmotesToShow; i++)
 	{
-		MainView.HSplitTop(6.0f, nullptr, &MainView);
-		MainView.HSplitTop(48.0f, &Button, &MainView);
+		CUIRect Row;
+		MainView.HSplitTop(38.0f, &Row, &MainView);
+		s_ScrollRegion.AddRect(Row); // Сообщаем скроллу о строке
 
-		CUIRect LBtn, RBtn, Icon;
-		Button.VSplitLeft(48.0f, &LBtn, &Button);
-		Button.VSplitRight(48.0f, &RBtn, &Icon);
+		Row.HSplitTop(32.0f, &Button, nullptr);
 
-		const bool Interactive = SetIdx == 2;
+		CUIRect Icon, Slider;
+		Button.VSplitLeft(32.0f, &Icon, &Slider);
+		Slider.VSplitLeft(10.0f, nullptr, &Slider);
 
-		if(Interactive && DoButton_Menu(&s_aLeftBtn[i], "<", 0, &LBtn))
-			*apCustomVars[i] = (*apCustomVars[i] + 15) % 16;
-		if(Interactive && DoButton_Menu(&s_aRightBtn[i], ">", 0, &RBtn))
-			*apCustomVars[i] = (*apCustomVars[i] + 1) % 16;
+		const bool Interactive = SetIdx == 4;
 
-		const float IconSize = 40.0f;
+		const float IconSize = 24.0f;
 		Graphics()->TextureSet(GameClient()->m_EmoticonsSkin.m_aSpriteEmoticons[pEmotes[i]]);
 		Graphics()->WrapClamp();
 		Graphics()->QuadsBegin();
@@ -588,13 +681,26 @@ void CMenus::RenderSettingsTestClient(CUIRect MainView)
 
 		if(Interactive)
 		{
-			MainView.HSplitTop(2.0f, nullptr, &MainView);
-			MainView.HSplitTop(14.0f, &Label, &MainView);
+			char aBuf[32];
+			str_format(aBuf, sizeof(aBuf), "Emote %d", i + 1);
+			// Лимит 0-15
+			Ui()->DoScrollbarOption(apCustomVars[i], apCustomVars[i], &Slider, aBuf, 0, 15, &CUi::ms_LinearScrollbarScale, 0u);
+		}
+		else
+		{
 			char aBuf[16];
-			str_format(aBuf, sizeof(aBuf), "#%d", *apCustomVars[i]);
+			str_format(aBuf, sizeof(aBuf), "#%d", pEmotes[i]);
 			TextRender()->TextColor(0.7f, 0.7f, 0.7f, 1.0f);
-			Ui()->DoLabel(&Label, aBuf, 10.0f, TEXTALIGN_MC);
+			Ui()->DoLabel(&Slider, aBuf, 14.0f, TEXTALIGN_ML);
 			TextRender()->TextColor(TextRender()->DefaultTextColor());
 		}
 	}
+
+	// Добавляем пустой прямоугольник в конце, чтобы скролл знал полную высоту
+	CUIRect EndRect;
+	MainView.HSplitTop(10.0f, &EndRect, &MainView);
+	s_ScrollRegion.AddRect(EndRect);
+
+	// Завершаем работу скролла
+	s_ScrollRegion.End();
 }

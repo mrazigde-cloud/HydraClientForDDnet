@@ -4138,8 +4138,8 @@ foreach(target ${TARGETS})
     # tidy-alphabetical-end
     # Enable Edit & Continue (Hot Reload) support
     if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.25)
-      set_property(TARGET ${target} PROPERTY MSVC_DEBUG_INFORMATION_FORMAT $<IF:$<CONFIG:Debug>,EditAndContinue,Embedded>)
-      target_link_options(${target} PRIVATE $<$<CONFIG:Debug>:/INCREMENTAL>)
+      set_property(TARGET ${target} PROPERTY MSVC_DEBUG_INFORMATION_FORMAT $<IF:$<CONFIG:Debug>,ProgramDatabase,Embedded>)
+      target_link_options(${target} PRIVATE $<$<CONFIG:Debug>:/INCREMENTAL:NO>)
     endif()
   endif()
   if(OUR_FLAGS_LINK)

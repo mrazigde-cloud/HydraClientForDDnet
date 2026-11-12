@@ -9,14 +9,18 @@
 #include <engine/console.h>
 
 #include <generated/protocol.h>
-
 #include <game/client/component.h>
+
+#include <engine/client.h>
+static constexpr int NUM_CONNS = IClient::NUM_CONNS;
 
 class CControls : public CComponent
 {
 public:
 	float GetMinMouseDistance() const;
 	float GetMaxMouseDistance() const;
+
+	bool m_ForceSnapInput = false;
 
 	enum class EMouseInputType
 	{
@@ -25,21 +29,21 @@ public:
 		AUTOMATED,
 	};
 
-	bool m_aMouseOnAction[NUM_DUMMIES];
-	vec2 m_aMousePos[NUM_DUMMIES];
-	vec2 m_aMousePosOnAction[NUM_DUMMIES];
-	vec2 m_aTargetPos[NUM_DUMMIES];
+	bool m_aMouseOnAction[NUM_CONNS];
+	vec2 m_aMousePos[NUM_CONNS];
+	vec2 m_aMousePosOnAction[NUM_CONNS];
+	vec2 m_aTargetPos[NUM_CONNS];
 
-	EMouseInputType m_aMouseInputType[NUM_DUMMIES];
+	EMouseInputType m_aMouseInputType[NUM_CONNS];
 
 	int m_aAmmoCount[NUM_WEAPONS];
 
 	int64_t m_LastSendTime;
-	CNetObj_PlayerInput m_aInputData[NUM_DUMMIES];
-	CNetObj_PlayerInput m_aLastData[NUM_DUMMIES];
-	int m_aInputDirectionLeft[NUM_DUMMIES];
-	int m_aInputDirectionRight[NUM_DUMMIES];
-	int m_aShowHookColl[NUM_DUMMIES];
+	CNetObj_PlayerInput m_aInputData[NUM_CONNS];
+	CNetObj_PlayerInput m_aLastData[NUM_CONNS];
+	int m_aInputDirectionLeft[NUM_CONNS];
+	int m_aInputDirectionRight[NUM_CONNS];
+	int m_aShowHookColl[NUM_CONNS];
 
 	CControls();
 	int Sizeof() const override { return sizeof(*this); }
@@ -50,7 +54,7 @@ public:
 	bool OnCursorMove(float x, float y, IInput::ECursorType CursorType) override;
 	void OnConsoleInit() override;
 	virtual void OnPlayerDeath();
-
+	int ActiveSlot() const;
 	int SnapInput(int *pData);
 	void ClampMousePos();
 	void ResetInput(int Dummy);

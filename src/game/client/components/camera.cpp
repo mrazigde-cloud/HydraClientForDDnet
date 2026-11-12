@@ -206,13 +206,13 @@ void CCamera::UpdateCamera()
 
 	if(GameClient()->m_Snap.m_SpecInfo.m_Active && !GameClient()->m_Snap.m_SpecInfo.m_UsePosition)
 	{
-		m_aDyncamCurrentCameraOffset[g_Config.m_ClDummy] = vec2(0, 0);
+		m_aDyncamCurrentCameraOffset[GameClient()->m_Controls.ActiveSlot()] = vec2(0, 0);
 		m_CanUseCameraInfo = CanUseCameraInfo;
 		m_UsingAutoSpecCamera = UsingAutoSpecCamera;
 		return;
 	}
 
-	vec2 TargetPos = CanUseCameraInfo ? GameClient()->m_CursorInfo.Target() : GameClient()->m_Controls.m_aMousePos[g_Config.m_ClDummy];
+	vec2 TargetPos = CanUseCameraInfo ? GameClient()->m_CursorInfo.Target() : GameClient()->m_Controls.m_aMousePos[GameClient()->m_Controls.ActiveSlot()];
 	int Smoothness = CanUseCameraInfo ? 50 : g_Config.m_ClDyncamSmoothness;
 	int Stabilizing = CanUseCameraInfo ? 50 : g_Config.m_ClDyncamStabilizing;
 	bool IsDyncam = CanUseCameraInfo ? true : g_Config.m_ClDyncam;
@@ -268,7 +268,7 @@ void CCamera::UpdateCamera()
 	}
 
 	m_LastTargetPos = TargetPos;
-	vec2 CurrentCameraOffset = m_aDyncamCurrentCameraOffset[g_Config.m_ClDummy];
+	vec2 CurrentCameraOffset = m_aDyncamCurrentCameraOffset[GameClient()->m_Controls.ActiveSlot()];
 	float SpeedBias = m_CameraSmoothing ? 50.0f : m_DyncamSmoothingSpeedBias;
 	if(Smoothness > 0)
 		CurrentCameraOffset += (m_DyncamTargetCameraOffset - CurrentCameraOffset) * std::min(DeltaTime * SpeedBias, 1.0f);
@@ -281,7 +281,7 @@ void CCamera::UpdateCamera()
 		CurrentCameraOffset = m_DyncamTargetCameraOffset;
 	}
 
-	m_aDyncamCurrentCameraOffset[g_Config.m_ClDummy] = CurrentCameraOffset;
+	m_aDyncamCurrentCameraOffset[GameClient()->m_Controls.ActiveSlot()] = CurrentCameraOffset;
 	m_CanUseCameraInfo = CanUseCameraInfo;
 	m_UsingAutoSpecCamera = UsingAutoSpecCamera;
 }
@@ -320,42 +320,46 @@ void CCamera::OnRender()
 	{
 		if(m_CamType != CAMTYPE_SPEC)
 		{
-			m_aLastPos[g_Config.m_ClDummy] = GameClient()->m_Controls.m_aMousePos[g_Config.m_ClDummy];
-			GameClient()->m_Controls.m_aMousePos[g_Config.m_ClDummy] = m_PrevCenter;
-			GameClient()->m_Controls.m_aMouseInputType[g_Config.m_ClDummy] = CControls::EMouseInputType::AUTOMATED;
+			const int Slot = GameClient()->m_Controls.ActiveSlot();
+			m_aLastPos[Slot] = GameClient()->m_Controls.m_aMousePos[Slot];
+			GameClient()->m_Controls.m_aMousePos[Slot] = m_PrevCenter;
+			GameClient()->m_Controls.m_aMouseInputType[Slot] = CControls::EMouseInputType::AUTOMATED;
 			GameClient()->m_Controls.ClampMousePos();
 			m_CamType = CAMTYPE_SPEC;
 		}
-		m_Center = GameClient()->m_Controls.m_aMousePos[g_Config.m_ClDummy];
+		m_Center = GameClient()->m_Controls.m_aMousePos[GameClient()->m_Controls.ActiveSlot()];
 	}
 	else
 	{
 		if(m_CamType != CAMTYPE_PLAYER)
 		{
-			GameClient()->m_Controls.m_aMousePos[g_Config.m_ClDummy] = m_aLastPos[g_Config.m_ClDummy];
-			GameClient()->m_Controls.m_aMouseInputType[g_Config.m_ClDummy] = CControls::EMouseInputType::AUTOMATED;
+			const int Slot = GameClient()->m_Controls.ActiveSlot();
+			GameClient()->m_Controls.m_aMousePos[Slot] = m_aLastPos[Slot];
+			GameClient()->m_Controls.m_aMouseInputType[Slot] = CControls::EMouseInputType::AUTOMATED;
 			GameClient()->m_Controls.ClampMousePos();
 			m_CamType = CAMTYPE_PLAYER;
 		}
 
 		if(Client()->IsExtraActive())
 		{
+			const int Slot = GameClient()->m_Controls.ActiveSlot();
 			const int ExtraId = Client()->GetExtraClientId();
 			if(ExtraId >= 0 && ExtraId < MAX_CLIENTS)
-				m_Center = GameClient()->m_aClients[ExtraId].m_RenderPos + m_aDyncamCurrentCameraOffset[g_Config.m_ClDummy];
+				m_Center = GameClient()->m_aClients[ExtraId].m_RenderPos + m_aDyncamCurrentCameraOffset[Slot];
 			else
-				m_Center = GameClient()->m_LocalCharacterPos + m_aDyncamCurrentCameraOffset[g_Config.m_ClDummy];
+				m_Center = GameClient()->m_LocalCharacterPos + m_aDyncamCurrentCameraOffset[Slot];
 		}
 		else if(GameClient()->m_Snap.m_SpecInfo.m_Active)
-			m_Center = GameClient()->m_Snap.m_SpecInfo.m_Position + m_aDyncamCurrentCameraOffset[g_Config.m_ClDummy];
+			m_Center = GameClient()->m_Snap.m_SpecInfo.m_Position + m_aDyncamCurrentCameraOffset[GameClient()->m_Controls.ActiveSlot()];
 		else
-			m_Center = GameClient()->m_LocalCharacterPos + m_aDyncamCurrentCameraOffset[g_Config.m_ClDummy];
+			m_Center = GameClient()->m_LocalCharacterPos + m_aDyncamCurrentCameraOffset[GameClient()->m_Controls.ActiveSlot()];
 	}
 
 	if(m_ForceFreeview && m_CamType == CAMTYPE_SPEC)
 	{
-		GameClient()->m_Controls.m_aMouseInputType[g_Config.m_ClDummy] = CControls::EMouseInputType::AUTOMATED;
-		m_Center = GameClient()->m_Controls.m_aMousePos[g_Config.m_ClDummy] = m_ForceFreeviewPos;
+		const int Slot = GameClient()->m_Controls.ActiveSlot();
+		GameClient()->m_Controls.m_aMouseInputType[Slot] = CControls::EMouseInputType::AUTOMATED;
+		m_Center = GameClient()->m_Controls.m_aMousePos[Slot] = m_ForceFreeviewPos;
 		m_ForceFreeview = false;
 	}
 	else

@@ -104,7 +104,8 @@ float CPlayers::GetPlayerTargetAngle(
 	if(g_Config.m_ClDummyCopyMoves && ClientId >= 0 && GameClient()->IsCopyAllOwnTee(ClientId) &&
 		!GameClient()->m_Snap.m_SpecInfo.m_Active && Client()->State() != IClient::STATE_DEMOPLAYBACK)
 	{
-		vec2 Direction = normalize(vec2((int)GameClient()->m_Controls.m_aMousePos[g_Config.m_ClDummy].x, (int)GameClient()->m_Controls.m_aMousePos[g_Config.m_ClDummy].y));
+const int MouseSlot = GameClient()->m_Controls.ActiveSlot();
+		vec2 Direction = normalize(vec2((int)GameClient()->m_Controls.m_aMousePos[MouseSlot].x, (int)GameClient()->m_Controls.m_aMousePos[MouseSlot].y));
 		if(Direction == vec2(0.0f, 0.0f))
 			Direction = vec2(1.0f, 0.0f);
 		return angle(Direction);
@@ -121,7 +122,8 @@ float CPlayers::GetPlayerTargetAngle(
 		!GameClient()->m_Snap.m_SpecInfo.m_Active && Client()->State() != IClient::STATE_DEMOPLAYBACK)
 	{
 		// calculate what would be sent to the server from our current input
-		vec2 Direction = normalize(vec2((int)GameClient()->m_Controls.m_aMousePos[g_Config.m_ClDummy].x, (int)GameClient()->m_Controls.m_aMousePos[g_Config.m_ClDummy].y));
+		const int MouseSlot = GameClient()->m_Controls.ActiveSlot();
+		vec2 Direction = normalize(vec2((int)GameClient()->m_Controls.m_aMousePos[MouseSlot].x, (int)GameClient()->m_Controls.m_aMousePos[MouseSlot].y));
 
 		// fix direction if mouse is exactly in the center
 		if(Direction == vec2(0.0f, 0.0f))
@@ -195,9 +197,22 @@ void CPlayers::RenderHookCollLine(
 	bool Aim = (Player.m_PlayerFlags & PLAYERFLAG_AIM);
 	if(!Client()->ServerCapAnyPlayerFlag())
 	{
-		for(int i = 0; i < NUM_DUMMIES; i++)
+		for(int i = 0; i < NUM_CONNS; i++)
 		{
-			if(ClientId == GameClient()->m_aLocalIds[i])
+			int LocalId;
+			if(i == 0)
+				LocalId = GameClient()->m_aLocalIds[0];
+			else if(i == 1)
+				LocalId = GameClient()->m_aLocalIds[1];
+			else
+				LocalId = -1; // extra's id не хранится в m_aLocalIds, проверяем ниже
+
+			if(i < NUM_DUMMIES && ClientId == LocalId)
+			{
+				Aim = GameClient()->m_Controls.m_aShowHookColl[i];
+				break;
+			}
+			if(i >= NUM_DUMMIES && ClientId == Client()->GetExtraClientId() && Client()->IsExtraActive())
 			{
 				Aim = GameClient()->m_Controls.m_aShowHookColl[i];
 				break;
@@ -211,10 +226,10 @@ void CPlayers::RenderHookCollLine(
 	bool AlwaysRenderHookColl = (Local ? g_Config.m_ClShowHookCollOwn : g_Config.m_ClShowHookCollOther) == 2;
 	bool RenderHookCollPlayer = Aim && (Local ? g_Config.m_ClShowHookCollOwn : g_Config.m_ClShowHookCollOther) > 0;
 	if(Local && Client()->State() != IClient::STATE_DEMOPLAYBACK)
-		RenderHookCollPlayer = GameClient()->m_Controls.m_aShowHookColl[g_Config.m_ClDummy] && g_Config.m_ClShowHookCollOwn > 0;
+		RenderHookCollPlayer = GameClient()->m_Controls.m_aShowHookColl[GameClient()->m_Controls.ActiveSlot()] && g_Config.m_ClShowHookCollOwn > 0;
 
 	if(GameClient()->PredictDummy() && g_Config.m_ClDummyCopyMoves &&
-		GameClient()->m_aLocalIds[!g_Config.m_ClDummy] == ClientId && GameClient()->m_Controls.m_aShowHookColl[g_Config.m_ClDummy] &&
+		GameClient()->m_aLocalIds[!g_Config.m_ClDummy] == ClientId && GameClient()->m_Controls.m_aShowHookColl[GameClient()->m_Controls.ActiveSlot()] &&
 		Client()->State() != IClient::STATE_DEMOPLAYBACK)
 	{
 		RenderHookCollPlayer = g_Config.m_ClShowHookCollOther > 0;

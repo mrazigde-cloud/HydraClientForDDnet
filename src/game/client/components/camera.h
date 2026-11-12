@@ -9,7 +9,6 @@
 #include <engine/console.h>
 
 #include <game/client/component.h>
-
 class CCamera : public CComponent
 {
 	friend class CMenuBackground;
@@ -24,7 +23,7 @@ public:
 
 private:
 	int m_CamType;
-	vec2 m_aLastPos[NUM_DUMMIES];
+	vec2 m_aLastPos[IClient::NUM_CONNS];
 	vec2 m_PrevCenter;
 
 	int m_PrevSpecId;
@@ -81,7 +80,7 @@ public:
 	float m_UserZoomTarget;
 
 	vec2 m_DyncamTargetCameraOffset;
-	vec2 m_aDyncamCurrentCameraOffset[NUM_DUMMIES];
+	vec2 m_aDyncamCurrentCameraOffset[IClient::NUM_CONNS];
 
 	CCamera();
 	int Sizeof() const override { return sizeof(*this); }

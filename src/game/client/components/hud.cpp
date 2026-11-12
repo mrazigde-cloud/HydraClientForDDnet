@@ -622,7 +622,7 @@ void CHud::RenderCursor()
 	{
 		// Render local cursor
 		CurWeapon = std::max(0, GameClient()->m_aClients[GameClient()->m_Snap.m_LocalClientId].m_Predicted.m_ActiveWeapon);
-		TargetPos = GameClient()->m_Controls.m_aTargetPos[g_Config.m_ClDummy];
+		TargetPos = GameClient()->m_Controls.m_aTargetPos[GameClient()->m_Controls.ActiveSlot()];
 	}
 	else
 	{

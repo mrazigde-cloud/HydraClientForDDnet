@@ -741,11 +741,12 @@ public:
 private:
 	int m_EmoteCycleBot = 0;
 	int m_EmoteCycleEmote = 0;
-	int m_EmoteCycleLastTick = -1;
+	int64_t m_EmoteCycleLastTime = 0;
 	bool m_EmoteCycleWasActive = false;
 
 public:
 	void Echo(const char *pString) override;
+	void ForceSnapInput() override;
 	bool IsOtherTeam(int ClientId) const;
 	int SwitchStateTeam() const;
 	bool IsLocalCharSuper() const;
