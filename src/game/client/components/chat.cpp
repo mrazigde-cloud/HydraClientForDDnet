@@ -1194,6 +1194,8 @@ void CChat::OnPrepareLines(float y)
 		TextRender()->SetRenderFlags(CurRenderFlags);
 		if(Line.m_TextContainerIndex.Valid())
 			TextRender()->UploadTextContainer(Line.m_TextContainerIndex);
+		if(Line.m_NameGradient.Valid())
+			Line.m_NameGradient.Upload(TextRender());
 	}
 
 	TextRender()->TextColor(TextRender()->DefaultTextColor());

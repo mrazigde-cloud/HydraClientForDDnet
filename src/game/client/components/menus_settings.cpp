@@ -420,7 +420,8 @@ void CMenus::RenderSettingsTestClient(CUIRect MainView)
 		TESTCLIENT_TAB_GENERAL = 0,
 		TESTCLIENT_TAB_NAME_GRADIENT = 1,
 		TESTCLIENT_TAB_TRAIL = 2,
-		NUMBER_OF_TESTCLIENT_TABS = 3,
+		TESTCLIENT_TAB_WEATHER = 3,
+		NUMBER_OF_TESTCLIENT_TABS = 4,
 	};
 	static int s_CurTab = TESTCLIENT_TAB_GENERAL;
 	{
@@ -432,7 +433,8 @@ void CMenus::RenderSettingsTestClient(CUIRect MainView)
 		const char *apTabNames[NUMBER_OF_TESTCLIENT_TABS] = {
 			Localize("General"),
 			Localize("Name Gradient"),
-			Localize("Trail")};
+			Localize("Trail"),
+			Localize("Weather")};
 		for(int Tab = 0; Tab < NUMBER_OF_TESTCLIENT_TABS; ++Tab)
 		{
 			TabBar.VSplitLeft(TabWidth, &Button, &TabBar);
@@ -587,6 +589,49 @@ void CMenus::RenderSettingsTestClient(CUIRect MainView)
 				Right.HSplitTop(ColorPickerLineSize, nullptr, &Right);
 			}
 		}
+
+		return;
+	}
+	// ***** Weather tab ***** //
+	if(s_CurTab == TESTCLIENT_TAB_WEATHER)
+	{
+		const float LineSize = 20.0f;
+		const float ColorPickerLineSize = 25.0f;
+		const float ColorPickerLabelSize = 13.0f;
+		const float ColorPickerLineSpacing = 5.0f;
+		const float HeadlineFontSize = 20.0f;
+		const float HeadlineHeight = 30.0f;
+		const float MarginSmall = 5.0f;
+
+		CUIRect Left, Button;
+		MainView.VSplitMid(&Left, nullptr, 20.0f);
+
+		Ui()->DoLabel_AutoLineSize(Localize("Weather"), HeadlineFontSize, TEXTALIGN_ML, &Left, HeadlineHeight);
+		Left.HSplitTop(MarginSmall, nullptr, &Left);
+
+		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_ClWeather, Localize("Enable weather effects"), &g_Config.m_ClWeather, &Left, LineSize);
+
+		Left.HSplitTop(LineSize, &Button, &Left);
+		Ui()->DoScrollbarOption(&g_Config.m_ClWeatherSnowCount, &g_Config.m_ClWeatherSnowCount, &Button, Localize("Snowflakes count"), 50, 2000);
+
+		Left.HSplitTop(LineSize, &Button, &Left);
+		Ui()->DoScrollbarOption(&g_Config.m_ClWeatherSnowSpeed, &g_Config.m_ClWeatherSnowSpeed, &Button, Localize("Snow speed"), 10, 500, &CUi::ms_LinearScrollbarScale, 0u, "%");
+
+		Left.HSplitTop(LineSize, &Button, &Left);
+		Ui()->DoScrollbarOption(&g_Config.m_ClWeatherSnowSize, &g_Config.m_ClWeatherSnowSize, &Button, Localize("Snowflake size"), 10, 500, &CUi::ms_LinearScrollbarScale, 0u, "%");
+
+		Left.HSplitTop(LineSize, &Button, &Left);
+		Ui()->DoScrollbarOption(&g_Config.m_ClWeatherSnowOpacity, &g_Config.m_ClWeatherSnowOpacity, &Button, Localize("Snow opacity"), 10, 100, &CUi::ms_LinearScrollbarScale, 0u, "%");
+
+		Left.HSplitTop(LineSize, &Button, &Left);
+		Ui()->DoScrollbarOption(&g_Config.m_ClWeatherSnowTileCollideChance, &g_Config.m_ClWeatherSnowTileCollideChance, &Button, Localize("Chance of landing on tiles"), 0, 100, &CUi::ms_LinearScrollbarScale, 0u, "%");
+
+		// Цвет снежинок (с альфой). Переменная CFGFLAG_COLALPHA,
+		// поэтому последний аргумент DoLine_ColorPicker = true.
+		static CButtonContainer s_SnowColorPicker;
+		DoLine_ColorPicker(&s_SnowColorPicker, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing,
+			&Left, Localize("Snowflake color"), &g_Config.m_ClWeatherSnowColor,
+			ColorRGBA(1.0f, 1.0f, 1.0f, 1.0f), false, nullptr, true);
 
 		return;
 	}

@@ -2749,6 +2749,8 @@ if(CLIENT)
     components/trails.h
     components/voting.cpp
     components/voting.h
+    components/weather.cpp
+    components/weather.h
     gameclient.cpp
     gameclient.h
     gradient_name.h

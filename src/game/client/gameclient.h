@@ -69,6 +69,7 @@
 #include "components/touch_controls.h"
 #include "components/trails.h"
 #include "components/voting.h"
+#include "components/weather.h"
 
 #include <memory>
 #include <vector>
@@ -179,6 +180,7 @@ public:
 	CTouchControls m_TouchControls;
 	CTrails m_Trails;
 	CVoting m_Voting;
+	CWeather m_Weather;
 	CSpectator m_Spectator;
 
 	CPlayers m_Players;

@@ -37,6 +37,7 @@
 #include "components/spectator.h"
 #include "components/statboard.h"
 #include "components/voting.h"
+#include "components/weather.h"
 #include "lineinput.h"
 #include "prediction/entities/character.h"
 #include "prediction/entities/projectile.h"
@@ -205,6 +206,7 @@ void CGameClient::OnConsoleInit()
 					      &m_Trails,
 					      &m_Players,
 					      &m_MapLayersForeground,
+					      &m_Weather,
 					      &m_Particles.m_RenderExplosions,
 					      &m_NamePlates,
 					      &m_Particles.m_RenderExtra,

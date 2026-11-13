@@ -230,6 +230,18 @@ public:
 	vec2 Size() const { return m_Size; }
 	float Width() const { return m_Size.x; }
 
+	// Явная загрузка всех glyph-контейнеров в GPU. Нужна, когда глифы
+	// создавались под флагом TEXT_RENDER_FLAG_NO_AUTOMATIC_QUAD_UPLOAD
+	// (как в CChat::OnPrepareLines).
+	void Upload(ITextRender *pTextRender)
+	{
+		for(auto &Glyph : m_vGlyphs)
+		{
+			if(Glyph.m_Container.Valid())
+				pTextRender->UploadTextContainer(Glyph.m_Container);
+		}
+	}
+
 	void Render(ITextRender *pTextRender, vec2 Pos, const SNameGradientParams &Params, float Time,
 		float Alpha, ColorRGBA OutlineColor) const
 	{

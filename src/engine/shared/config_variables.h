@@ -70,6 +70,15 @@ MACRO_CONFIG_INT(ClTrailOther, cl_trail_other, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG
 MACRO_CONFIG_INT(ClTrailOtherColorMode, cl_trail_other_color_mode, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Other trail color mode (0 = solid, 1 = random)")
 MACRO_CONFIG_COL(ClTrailOtherColor, cl_trail_other_color, 11206528, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Other trail color")
 
+// Weather
+MACRO_CONFIG_INT(ClWeather, cl_weather, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Enable weather effects")
+MACRO_CONFIG_INT(ClWeatherSnowCount, cl_weather_snow_count, 300, 0, 2000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Number of snowflakes")
+MACRO_CONFIG_INT(ClWeatherSnowSpeed, cl_weather_snow_speed, 100, 10, 500, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Snow falling speed (percent)")
+MACRO_CONFIG_INT(ClWeatherSnowSize, cl_weather_snow_size, 100, 10, 500, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Snowflake size (percent)")
+MACRO_CONFIG_INT(ClWeatherSnowOpacity, cl_weather_snow_opacity, 80, 10, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Snow opacity (percent)")
+MACRO_CONFIG_INT(ClWeatherSnowTileCollideChance, cl_weather_snow_tile_collide_chance, 85, 0, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Chance that a snowflake lands on tiles (percent)")
+MACRO_CONFIG_COL(ClWeatherSnowColor, cl_weather_snow_color, 0xFFFFFFFF, CFGFLAG_CLIENT | CFGFLAG_SAVE | CFGFLAG_COLALPHA, "Snowflake color")
+
 // Name gradient: own (main, dummy, extra1, extra2)
 MACRO_CONFIG_INT(ClNameGradientOwn, cl_name_gradient_own, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Name gradient for own names (main, dummy, extra)")
 MACRO_CONFIG_INT(ClNameGradientOwnSpeed, cl_name_gradient_own_speed, 30, 1, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Own name gradient speed")
