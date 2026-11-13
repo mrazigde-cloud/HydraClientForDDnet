@@ -55,7 +55,7 @@ void CMenus::RenderSettings(CUIRect MainView)
 		Localize("Sound"),
 		Localize("DDNet"),
 		Localize("Assets"),
-		"Test Client",
+		"Hydra Client",
 		Localize("Credits")};
 	static CButtonContainer s_aTabButtons[SETTINGS_LENGTH];
 
