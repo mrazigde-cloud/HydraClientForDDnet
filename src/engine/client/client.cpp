@@ -371,6 +371,69 @@ bool CClient::ConnectionProblems() const
 	return m_aNetClient[g_Config.m_ClDummy].GotProblems(MaxLatencyTicks() * time_freq() / GameTickSpeed());
 }
 
+static void ForceFireRelease(CNetObj_PlayerInput *pInput, const CNetObj_PlayerInput *pLast)
+{
+	int Fire = pLast ? (pLast->m_Fire & 63) : 0;
+	if(Fire & 1)
+		Fire = (Fire + 1) & 63;
+	pInput->m_Fire = Fire;
+}
+
+// CopyAll: счётчик fire ведём отдельно для каждого соединения от его последнего
+// отправленного значения, чтобы сервер не видел скачка 0->N как серию нажатий.
+static void MatchFireParity(CNetObj_PlayerInput *pInput, const CNetObj_PlayerInput *pLast, int WantedFire)
+{
+	int Fire = pLast ? (pLast->m_Fire & 63) : 0;
+	if((Fire & 1) != (WantedFire & 1))
+		Fire = (Fire + 1) & 63;
+	pInput->m_Fire = Fire;
+}
+
+// Немедленно отправляет release fire на все онлайн-соединения, где последний
+// отправленный инпут имел зажатый fire. Вызывать при любом переключении.
+void CClient::ReleaseAllFire()
+{
+	const int64_t Now = time_get();
+	const int aConns[] = {CONN_MAIN, CONN_DUMMY, CONN_EXTRA1, CONN_EXTRA2};
+	for(const int Conn : aConns)
+	{
+		if(m_aNetClient[Conn].State() != NETSTATE_ONLINE)
+			continue;
+
+		const int LastIdx = (m_aCurrentInput[Conn] + 199) % 200;
+		const auto *pLast = (const CNetObj_PlayerInput *)m_aInputs[Conn][LastIdx].m_aData;
+		const int Slot = Conn == CONN_MAIN ? 0 : (Conn == CONN_DUMMY ? 1 : 2 + IClient::ExtraConnToIndex(Conn));
+		if(!(pLast->m_Fire & 1))
+		{
+			// на сервере уже отпущено: выровнять желаемое состояние контролов
+			GameClient()->SetSlotFireReleased(Slot, pLast->m_Fire);
+			continue;
+		}
+
+		auto &Input = m_aInputs[Conn][m_aCurrentInput[Conn]];
+		mem_copy(Input.m_aData, m_aInputs[Conn][LastIdx].m_aData, sizeof(CNetObj_PlayerInput));
+		ForceFireRelease((CNetObj_PlayerInput *)Input.m_aData, pLast);
+
+		Input.m_Tick = m_aPredTick[g_Config.m_ClDummy];
+		Input.m_PredictedTime = m_PredictedTime.Get(Now);
+		Input.m_PredictionMargin = PredictionMargin() * time_freq() / 1000;
+		Input.m_Time = Now;
+
+		CMsgPacker Msg(NETMSG_INPUT, true);
+		Msg.AddInt(m_aAckGameTick[Conn]);
+		Msg.AddInt(Input.m_Tick);
+		Msg.AddInt(sizeof(CNetObj_PlayerInput));
+		for(int k = 0; k < (int)sizeof(CNetObj_PlayerInput) / 4; k++)
+			Msg.AddInt(Input.m_aData[k]);
+
+		GameClient()->SetSlotFireReleased(Slot, ((const CNetObj_PlayerInput *)Input.m_aData)->m_Fire);
+
+		m_aCurrentInput[Conn]++;
+		m_aCurrentInput[Conn] %= 200;
+		SendMsg(Conn, &Msg, MSGFLAG_FLUSH);
+	}
+}
+
 void CClient::SendInput()
 {
 	// Если Extra не онлайн, но режим залип на EXTRA — вернуть MAIN и антипинг
@@ -385,14 +448,20 @@ void CClient::SendInput()
 		return;
 
 	const bool ExtraActive = IClient::IsExtraConn(m_ActiveConn) && m_aNetClient[m_ActiveConn].State() == NETSTATE_ONLINE;
-	const bool CopyAll = g_Config.m_ClDummyCopyMoves != 0;
+	const bool CopyAll = g_Config.m_ClDummyCopyMoves != 0 &&
+	(DummyConnected() || IsExtraConnOnline(CONN_EXTRA1) || IsExtraConnOnline(CONN_EXTRA2));
+	if(CopyAll != m_LastCopyAll)
+	{
+		m_LastCopyAll = CopyAll;
+		ReleaseAllFire();
+	}
 
 	// Кэшируем input один раз — берём напрямую из m_Controls (а не SnapInput,
 	// который может вернуть 0 "нет изменений" → extras получат нули и будут "спамить")
 	int aCopyAllBuf[sizeof(CNetObj_PlayerInput) / sizeof(int)];
 	int CopyAllSize = 0;
 	if(CopyAll)
-		CopyAllSize = GameClient()->GetCurrentInput(aCopyAllBuf);
+		CopyAllSize = GameClient()->GetActiveInput(aCopyAllBuf);
 
 	bool Force = false;
 	for(int Dummy = 0; Dummy < NUM_DUMMIES; Dummy++)
@@ -407,31 +476,61 @@ void CClient::SendInput()
 		{
 			Size = CopyAllSize;
 			mem_copy(m_aInputs[i][m_aCurrentInput[i]].m_aData, aCopyAllBuf, CopyAllSize);
-		}
-		else if(ExtraActive && i == CONN_MAIN)
-		{
-			Size = sizeof(CNetObj_PlayerInput);
-			const int PrevIdx = (m_aCurrentInput[i] + 199) % 200;
-			const auto *pPrev = (const CNetObj_PlayerInput *)m_aInputs[i][PrevIdx].m_aData;
-			auto *pInput = (CNetObj_PlayerInput *)m_aInputs[i][m_aCurrentInput[i]].m_aData;
-			*pInput = {};
-			pInput->m_TargetX = pPrev->m_TargetX;
-			pInput->m_TargetY = pPrev->m_TargetY;
-			pInput->m_WantedWeapon = pPrev->m_WantedWeapon;
-			pInput->m_NextWeapon = pPrev->m_NextWeapon;
-			pInput->m_PrevWeapon = pPrev->m_PrevWeapon;
+			MatchFireParity((CNetObj_PlayerInput *)m_aInputs[i][m_aCurrentInput[i]].m_aData,
+				(const CNetObj_PlayerInput *)m_aInputs[i][(m_aCurrentInput[i] + 199) % 200].m_aData,
+				((const CNetObj_PlayerInput *)aCopyAllBuf)->m_Fire);
 		}
 		else
 		{
+			// Main/dummy всегда через OnSnapInput.
+			// При ExtraActive main получает Slot=g_Config.m_ClDummy (замороженный),
+			// dummy — через m_DummyInput. Это и есть нужное «залипание» клавиш.
 			Size = GameClient()->OnSnapInput(m_aInputs[i][m_aCurrentInput[i]].m_aData, Dummy, Force);
+
+			// Отпускаем fire для замороженных соединений.
+			// ВАЖНО: если SnapInput вернул 0 («нет изменений»), Size == 0,
+			// но fire всё ещё зажат с прошлого раза. Надо принудительно отправить
+			// fire=0, иначе сервер думает «огонь зажат» и соединение стреляет вечно.
+			const bool FrozenConn = (Dummy != 0) || ExtraActive;
+			if(FrozenConn)
+			{
+				// Синхронизируем CControls: fire должен быть чётным,
+				// иначе следующий SnapInput отправит «зажатый» fire при
+				// любом изменении других полей (мышь, чат) и сервер выстрелит.
+				GameClient()->ForceReleaseFire(i);
+
+				const int LastIdx = (m_aCurrentInput[i] + 199) % 200;
+				const auto *pLast = (const CNetObj_PlayerInput *)m_aInputs[i][LastIdx].m_aData;
+				const bool WasFiring = (pLast->m_Fire & 1) != 0;
+
+				// SnapInput вернул 0 — но fire мог остаться зажатым.
+				// Формируем пакет из замороженного слота, чтобы отправить release.
+				if(Size == 0 && WasFiring)
+				{
+					Size = GameClient()->GetFrozenInput(
+						m_aInputs[i][m_aCurrentInput[i]].m_aData, i);
+				}
+				if(Size >= (int)sizeof(CNetObj_PlayerInput))
+				{
+					auto *pInput = (CNetObj_PlayerInput *)m_aInputs[i][m_aCurrentInput[i]].m_aData;
+					ForceFireRelease(pInput, pLast);
+				}
+			}
 
 			if(m_aSuppressFireTicks[i] > 0)
 			{
 				m_aSuppressFireTicks[i]--;
+				GameClient()->ForceReleaseFire(i);
+				if(Size == 0)
+				{
+					Size = GameClient()->GetFrozenInput(
+						m_aInputs[i][m_aCurrentInput[i]].m_aData, i);
+				}
 				if(Size >= (int)sizeof(CNetObj_PlayerInput))
 				{
 					auto *pInput = (CNetObj_PlayerInput *)m_aInputs[i][m_aCurrentInput[i]].m_aData;
-					pInput->m_Fire = 0;
+					const int LastIdx = (m_aCurrentInput[i] + 199) % 200;
+					ForceFireRelease(pInput, (const CNetObj_PlayerInput *)m_aInputs[i][LastIdx].m_aData);
 				}
 			}
 		}
@@ -439,16 +538,8 @@ void CClient::SendInput()
 		if(Size > 0)
 		{
 			auto &Input = m_aInputs[i][m_aCurrentInput[i]];
-			if(ExtraActive && i == CONN_MAIN && !CopyAll)
-			{
-				Input.m_Tick = (int)(m_aGameTime[CONN_MAIN].Get(Now) * GameTickSpeed() / time_freq()) + 1;
-				Input.m_PredictedTime = m_aGameTime[CONN_MAIN].Get(Now);
-			}
-			else
-			{
-				Input.m_Tick = m_aPredTick[g_Config.m_ClDummy];
-				Input.m_PredictedTime = m_PredictedTime.Get(Now);
-			}
+			Input.m_Tick = m_aPredTick[g_Config.m_ClDummy];
+			Input.m_PredictedTime = m_PredictedTime.Get(Now);
 			Input.m_PredictionMargin = PredictionMargin() * time_freq() / 1000;
 			Input.m_Time = Now;
 
@@ -481,33 +572,45 @@ void CClient::SendInput()
 		{
 			Size = CopyAllSize;
 			mem_copy(m_aInputs[Conn][m_aCurrentInput[Conn]].m_aData, aCopyAllBuf, CopyAllSize);
+			MatchFireParity((CNetObj_PlayerInput *)m_aInputs[Conn][m_aCurrentInput[Conn]].m_aData,
+				(const CNetObj_PlayerInput *)m_aInputs[Conn][(m_aCurrentInput[Conn] + 199) % 200].m_aData,
+				((const CNetObj_PlayerInput *)aCopyAllBuf)->m_Fire);
 		}
 		else if(ThisActive)
 		{
-			Size = GameClient()->OnSnapInput(m_aInputs[Conn][m_aCurrentInput[Conn]].m_aData, 0, true);
+			// Активный extra — свой слот (2 или 3) через GetCurrentInput → ActiveSlot()
+			Size = GameClient()->GetCurrentInput(m_aInputs[Conn][m_aCurrentInput[Conn]].m_aData);
 
 			if(m_aSuppressFireTicks[Conn] > 0)
 			{
 				m_aSuppressFireTicks[Conn]--;
+				GameClient()->ForceReleaseFire(2 + ExtraIdx);
 				if(Size >= (int)sizeof(CNetObj_PlayerInput))
 				{
 					auto *pInput = (CNetObj_PlayerInput *)m_aInputs[Conn][m_aCurrentInput[Conn]].m_aData;
-					pInput->m_Fire = 0;
+					const int LastIdx = (m_aCurrentInput[Conn] + 199) % 200;
+					ForceFireRelease(pInput, (const CNetObj_PlayerInput *)m_aInputs[Conn][LastIdx].m_aData);
 				}
 			}
 		}
 		else
 		{
-			Size = sizeof(CNetObj_PlayerInput);
-			const int PrevIdx = (m_aCurrentInput[Conn] + 199) % 200;
-			const auto *pPrev = (const CNetObj_PlayerInput *)m_aInputs[Conn][PrevIdx].m_aData;
+			// Неактивный extra — копируем замороженный слот и принудительно
+			// гасим fire. Делаем это безусловно (даже при CopyAll — сюда мы
+			// попадаем только если CopyAll-ветка выше не сработала, а с
+			// GetActiveInput она срабатывает всегда).
+			const int ExtraSlot = 2 + ExtraIdx;
+			GameClient()->ForceReleaseFire(ExtraSlot);
+			GameClient()->GetFrozenInput(
+				m_aInputs[Conn][m_aCurrentInput[Conn]].m_aData, ExtraSlot);
 			auto *pInput = (CNetObj_PlayerInput *)m_aInputs[Conn][m_aCurrentInput[Conn]].m_aData;
-			*pInput = {};
-			pInput->m_TargetX = pPrev->m_TargetX;
-			pInput->m_TargetY = pPrev->m_TargetY;
-			pInput->m_WantedWeapon = pPrev->m_WantedWeapon;
-			pInput->m_NextWeapon = pPrev->m_NextWeapon;
-			pInput->m_PrevWeapon = pPrev->m_PrevWeapon;
+			const int LastIdx = (m_aCurrentInput[Conn] + 199) % 200;
+			ForceFireRelease(pInput, (const CNetObj_PlayerInput *)m_aInputs[Conn][LastIdx].m_aData);
+			Size = sizeof(CNetObj_PlayerInput);
+
+			if(g_Config.m_Debug)
+				log_info("extra_fire", "inactive conn=%d slot=%d sent_fire=%d tick=%d",
+					Conn, ExtraSlot, pInput->m_Fire, m_aPredTick[g_Config.m_ClDummy]);
 		}
 
 		if(Size > 0)
@@ -2129,7 +2232,13 @@ void CClient::ProcessServerPacket(CNetChunk *pPacket, int Conn, bool Dummy)
 			m_DummyConnecting = false;
 			//Переключаемся на дамми только если включена автосмена
 			if(g_Config.m_ClExtraAutoSwitch)
+			{
+				ReleaseAllFire();
 				g_Config.m_ClDummy = 1;
+				m_ActiveConn = CONN_MAIN;
+				m_aSuppressFireTicks[CONN_DUMMY] = 5;
+				GameClient()->ClearPreInputs();
+			}
 			Rcon("crashmeplx");
 			if(m_aRconAuthed[0] && !m_aRconAuthed[1])
 				RconAuth(m_aRconUsername, m_aRconPassword);
@@ -4262,9 +4371,9 @@ void CClient::Con_ToggleExtra(IConsole::IResult *pResult, void *pUserData)
 	const bool Extra2Online = pSelf->m_aNetClient[CONN_EXTRA2].State() == NETSTATE_ONLINE;
 	const bool DummyOnline = pSelf->DummyConnected();
 
-	// Сбросить input, чтобы fire/jump/hook не переносились на новое соединение
-	pSelf->GameClient()->ResetPlayerInput(0);
-	pSelf->GameClient()->ResetPlayerInput(1);
+	// НЕ сбрасываем слоты 0/1 — иначе зажатые клавиши на покинутом
+	// соединении пропадают. Fire на новое соединение гасится через
+	// m_aSuppressFireTicks в SwitchControlToExtra / SwitchToDummy.
 
 	if(!Extra1Online && !Extra2Online && !DummyOnline)
 	{
@@ -4274,7 +4383,7 @@ void CClient::Con_ToggleExtra(IConsole::IResult *pResult, void *pUserData)
 
 	// Восстановить main snapshots (общий код для переходов на main)
 	auto SwitchToMain = [pSelf]() {
-
+		pSelf->ReleaseAllFire();
 		g_Config.m_ClDummy = 0;
 		pSelf->m_ActiveConn = CONN_MAIN;
 		pSelf->m_aSuppressFireTicks[CONN_MAIN] = 5;
@@ -4310,6 +4419,7 @@ void CClient::Con_ToggleExtra(IConsole::IResult *pResult, void *pUserData)
 	};
 
 	auto SwitchToDummy = [pSelf]() {
+		pSelf->ReleaseAllFire();
 		const int OldConn = pSelf->m_ActiveConn;
 		if(OldConn >= 0 && OldConn < NUM_CONNS)
 		{
@@ -4370,18 +4480,18 @@ void CClient::Con_ToggleExtra(IConsole::IResult *pResult, void *pUserData)
 }
 void CClient::SwitchControlToExtra(int Conn)
 {
+	ReleaseAllFire();
 	g_Config.m_ClDummy = 0;
 	m_ActiveConn = Conn;
 	m_aSuppressFireTicks[Conn] = 5;
 
-	for(int i = 0; i < 200; i++)
-	{
-		auto *pInput = (CNetObj_PlayerInput *)m_aInputs[Conn][i].m_aData;
-		pInput->m_Fire = 0;
-		pInput->m_Hook = 0;
-		pInput->m_Jump = 0;
-		pInput->m_Direction = 0;
-	}
+	// fire отпускается через ReleaseAllFire() выше — он отправил release
+	// на все соединения, где последний пакет был зажат. Дополнительно
+	// перезаписывать историю m_aInputs нельзя: сервер видит разницу между
+	// последним отправленным пакетом и новым. Замена fire=2 (release) на
+	// fire=0 в истории выглядит как 2→0, то есть ~62 нажатия по кругу
+	// счётчика — extra начинает стрелять сам.
+	// hook/jump/direction не трогаем: они залипают как в оригинальном DDNet.
 
 	GameClient()->ForceSnapInput();
 	GameClient()->ClearPreInputs();

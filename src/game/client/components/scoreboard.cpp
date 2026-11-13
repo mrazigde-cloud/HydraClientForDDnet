@@ -20,6 +20,7 @@
 #include <game/client/components/motd.h>
 #include <game/client/components/statboard.h>
 #include <game/client/gameclient.h>
+#include <game/client/gradient_name.h>
 #include <game/client/ui.h>
 #include <game/localization.h>
 
@@ -133,6 +134,7 @@ void CScoreboard::ResetTexts()
 		Player.m_Score.Reset(TextRender());
 		Player.m_ScoreMillis.Reset(TextRender());
 		Player.m_Name.Reset(TextRender());
+		Player.m_NameGradient.Reset(TextRender());
 		Player.m_ReadyMark.Reset(TextRender());
 		Player.m_Clan.Reset(TextRender());
 		Player.m_Ping.Reset(TextRender());
@@ -414,7 +416,11 @@ void CScoreboard::RenderSpectators(CUIRect Spectators)
 				TextRender()->TextColor(color_cast<ColorRGBA>(ColorHSLA(g_Config.m_ClAuthedPlayerColor)));
 			}
 
-			TextRender()->TextEx(pCursor, ClientData.m_aName);
+			if(!ClientData.m_AuthLevel && NameGradientAppliesTo(*GameClient(), pInfo->m_ClientId))
+				RenderGradientTextEx(TextRender(), pCursor, ClientData.m_aName,
+					SNameGradientParams::FromConfig(NameGradientGroup(*GameClient(), pInfo->m_ClientId)), Client()->LocalTime());
+			else
+				TextRender()->TextEx(pCursor, ClientData.m_aName);
 			TextRender()->TextColor(TextRender()->DefaultTextColor());
 		};
 
@@ -838,35 +844,58 @@ void CScoreboard::RenderScoreboard(CUIRect Scoreboard, int Team, int CountStart,
 
 			// name
 			{
-				if(g_Config.m_ClShowIds)
+				const bool UseNameGradient = !ClientData.m_AuthLevel && NameGradientAppliesTo(*GameClient(), pInfo->m_ClientId);
+				float NameWidth;
+				if(UseNameGradient)
 				{
-					char aClientId[16];
-					GameClient()->FormatClientId(pInfo->m_ClientId, aClientId, EClientIdFormat::INDENT_AUTO);
-					str_copy(aBuf, aClientId);
-					str_append(aBuf, ClientData.m_aName);
+					// the client id stays in the normal color, only the name itself gets the gradient
+					float IdWidth = 0.0f;
+					if(g_Config.m_ClShowIds)
+					{
+						char aClientId[16];
+						GameClient()->FormatClientId(pInfo->m_ClientId, aClientId, EClientIdFormat::INDENT_AUTO);
+						Player.m_Name.Update(TextRender(), aClientId, FontSize);
+						Player.m_Name.Render(TextRender(), vec2(NameOffset, TextY), TextColor);
+						IdWidth = Player.m_Name.Width();
+					}
+					Player.m_NameGradient.Update(TextRender(), ClientData.m_aName, FontSize, std::max(0.0f, NameLength - IdWidth));
+					Player.m_NameGradient.Render(TextRender(), vec2(NameOffset + IdWidth, TextY),
+						SNameGradientParams::FromConfig(NameGradientGroup(*GameClient(), pInfo->m_ClientId)),
+						Client()->LocalTime(), TextColor.a, TextRender()->DefaultTextOutlineColor().WithMultipliedAlpha(TextColor.a));
+					NameWidth = IdWidth + Player.m_NameGradient.Width();
 				}
 				else
 				{
-					str_copy(aBuf, ClientData.m_aName);
-				}
-				Player.m_Name.Update(TextRender(), aBuf, FontSize, NameLength, TEXTFLAG_RENDER | TEXTFLAG_ELLIPSIS_AT_END);
+					Player.m_NameGradient.Reset(TextRender());
+					if(g_Config.m_ClShowIds)
+					{
+						char aClientId[16];
+						GameClient()->FormatClientId(pInfo->m_ClientId, aClientId, EClientIdFormat::INDENT_AUTO);
+						str_copy(aBuf, aClientId);
+						str_append(aBuf, ClientData.m_aName);
+					}
+					else
+					{
+						str_copy(aBuf, ClientData.m_aName);
+					}
+					Player.m_Name.Update(TextRender(), aBuf, FontSize, NameLength, TEXTFLAG_RENDER | TEXTFLAG_ELLIPSIS_AT_END);
 
-				ColorRGBA NameColor = TextColor;
-				if(ClientData.m_AuthLevel)
-				{
-					NameColor = color_cast<ColorRGBA>(ColorHSLA(g_Config.m_ClAuthedPlayerColor));
+					ColorRGBA NameColor = TextColor;
+					if(ClientData.m_AuthLevel)
+					{
+						NameColor = color_cast<ColorRGBA>(ColorHSLA(g_Config.m_ClAuthedPlayerColor));
+					}
+					Player.m_Name.Render(TextRender(), vec2(NameOffset, TextY), NameColor);
+					NameWidth = Player.m_Name.Width();
 				}
-				Player.m_Name.Render(TextRender(), vec2(NameOffset, TextY), NameColor);
 
 				// ready / watching
 				if(Client()->IsSixup() && Client()->m_TranslationContext.m_aClients[pInfo->m_ClientId].m_PlayerFlags7 & protocol7::PLAYERFLAG_READY)
 				{
 					Player.m_ReadyMark.Update(TextRender(), "✓", FontSize);
-					Player.m_ReadyMark.Render(TextRender(), vec2(NameOffset + Player.m_Name.Width(), TextY), ColorRGBA(0.1f, 1.0f, 0.1f, TextColor.a));
+					Player.m_ReadyMark.Render(TextRender(), vec2(NameOffset + NameWidth, TextY), ColorRGBA(0.1f, 1.0f, 0.1f, TextColor.a));
 				}
 			}
-
-			// clan
 			{
 				ColorRGBA ClanColor = TextColor;
 				if(GameClient()->m_aLocalIds[g_Config.m_ClDummy] >= 0 && str_comp(ClientData.m_aClan, GameClient()->m_aClients[GameClient()->m_aLocalIds[g_Config.m_ClDummy]].m_aClan) == 0)

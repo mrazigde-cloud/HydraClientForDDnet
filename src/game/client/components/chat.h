@@ -13,6 +13,8 @@
 #include <generated/protocol7.h>
 
 #include <game/client/component.h>
+
+#include <game/client/gradient_name.h>
 #include <game/client/lineinput.h>
 #include <game/client/render.h>
 
@@ -53,6 +55,9 @@ class CChat : public CComponent
 		std::optional<ColorRGBA> m_CustomColor;
 
 		STextContainerIndex m_TextContainerIndex;
+		CGradientText m_NameGradient;
+		int m_NameGradientGroup = 0;
+		vec2 m_NameGradientPos = vec2(0.0f, 0.0f);
 		int m_QuadContainerIndex;
 
 		std::shared_ptr<CManagedTeeRenderInfo> m_pManagedTeeRenderInfo;

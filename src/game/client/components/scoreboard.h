@@ -10,6 +10,8 @@
 #include <game/client/ui.h>
 #include <game/client/ui_rect.h>
 
+#include <game/client/gradient_name.h>
+
 class CScoreboard : public CComponent
 {
 	struct CScoreboardRenderState
@@ -88,6 +90,8 @@ class CScoreboard : public CComponent
 		CCachedText m_ReadyMark;
 		CCachedText m_Clan;
 		CCachedText m_Ping;
+		CGradientText m_NameGradient;
+	   	int m_NameGradientGroup = 0;
 	};
 	CPlayerElement m_aPlayers[MAX_CLIENTS];
 

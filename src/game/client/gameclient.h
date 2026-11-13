@@ -67,6 +67,7 @@
 #include "components/spectator.h"
 #include "components/statboard.h"
 #include "components/touch_controls.h"
+#include "components/trails.h"
 #include "components/voting.h"
 
 #include <memory>
@@ -176,6 +177,7 @@ public:
 	CEmoticon m_Emoticon;
 	CDamageInd m_DamageInd;
 	CTouchControls m_TouchControls;
+	CTrails m_Trails;
 	CVoting m_Voting;
 	CSpectator m_Spectator;
 
@@ -629,6 +631,8 @@ public:
 	void OnActivateEditor() override;
 	void OnDummySwap() override;
 	int OnSnapInput(int *pData, bool Dummy, bool Force) override;
+	int GetFrozenInput(int *pData, int Slot) override;
+	void ForceReleaseFire(int Slot) override;
 	void OnShutdown() override;
 	void OnEnterGame() override;
 	void OnRconType(bool UsernameReq) override;
@@ -732,6 +736,7 @@ public:
 	void ResetPlayerInput(int PlayerOrDummy) override;
 	void ClearPreInputs() override;
 	int GetCurrentInput(int *pData) override;
+	int GetActiveInput(int *pData) override;
 
 	void SendEmoteToConn(int Conn, int Emoticon);
 	void UpdateEmoteCycle();
@@ -747,6 +752,7 @@ private:
 public:
 	void Echo(const char *pString) override;
 	void ForceSnapInput() override;
+	void SetSlotFireReleased(int Slot, int Fire) override;
 	bool IsOtherTeam(int ClientId) const;
 	int SwitchStateTeam() const;
 	bool IsLocalCharSuper() const;

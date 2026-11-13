@@ -2745,10 +2745,13 @@ if(CLIENT)
     components/statboard.h
     components/touch_controls.cpp
     components/touch_controls.h
+    components/trails.cpp
+    components/trails.h
     components/voting.cpp
     components/voting.h
     gameclient.cpp
     gameclient.h
+    gradient_name.h
     laser_data.cpp
     laser_data.h
     lineinput.cpp

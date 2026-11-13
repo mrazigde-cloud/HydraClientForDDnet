@@ -55,9 +55,11 @@ public:
 	void OnConsoleInit() override;
 	virtual void OnPlayerDeath();
 	int ActiveSlot() const;
-	int SnapInput(int *pData);
+	int SnapInput(int *pData, int Slot = -1);
 	void ClampMousePos();
 	void ResetInput(int Dummy);
+	void ForceReleaseFire(int Slot);
+	void SetSlotFireReleased(int Slot, int Fire);
 
 private:
 	static void ConKeyInputState(IConsole::IResult *pResult, void *pUserData);

@@ -25,6 +25,7 @@
 #include <game/client/components/skins.h>
 #include <game/client/components/sounds.h>
 #include <game/client/gameclient.h>
+#include <game/client/gradient_name.h>
 #include <game/localization.h>
 
 char CChat::ms_aDisplayText[MAX_CHAT_LENGTH] = "";
@@ -38,6 +39,7 @@ CChat::CLine::CLine()
 void CChat::CLine::Reset(CChat &This)
 {
 	This.TextRender()->DeleteTextContainer(m_TextContainerIndex);
+	m_NameGradient.Reset(This.TextRender());
 	This.Graphics()->DeleteQuadContainer(m_QuadContainerIndex);
 	m_Initialized = false;
 	m_Time = 0;
@@ -108,6 +110,7 @@ void CChat::RebuildChat()
 		if(!Line.m_Initialized)
 			continue;
 		TextRender()->DeleteTextContainer(Line.m_TextContainerIndex);
+		Line.m_NameGradient.Reset(TextRender());
 		Graphics()->DeleteQuadContainer(Line.m_QuadContainerIndex);
 		// recalculate sizes
 		Line.m_aYOffset[0] = -1.0f;
@@ -266,6 +269,9 @@ void CChat::OnInit()
 	Console()->Chain("cl_chat_old", ConchainChatOld, this);
 	Console()->Chain("cl_chat_size", ConchainChatFontSize, this);
 	Console()->Chain("cl_chat_width", ConchainChatWidth, this);
+	Console()->Chain("cl_name_gradient_own", ConchainChatOld, this);
+	Console()->Chain("cl_name_gradient_friend", ConchainChatOld, this);
+	Console()->Chain("cl_name_gradient_other", ConchainChatOld, this);
 }
 
 bool CChat::OnInput(const IInput::CEvent &Event)
@@ -775,6 +781,7 @@ void CChat::AddLine(int ClientId, int Team, const char *pLine)
 	{
 		PreviousLine.m_TimesRepeated++;
 		TextRender()->DeleteTextContainer(PreviousLine.m_TextContainerIndex);
+		PreviousLine.m_NameGradient.Reset(TextRender());
 		Graphics()->DeleteQuadContainer(PreviousLine.m_QuadContainerIndex);
 		PreviousLine.m_Time = time();
 		PreviousLine.m_aYOffset[0] = -1.0f;
@@ -983,6 +990,7 @@ void CChat::OnPrepareLines(float y)
 			continue;
 
 		TextRender()->DeleteTextContainer(Line.m_TextContainerIndex);
+		Line.m_NameGradient.Reset(TextRender());
 		Graphics()->DeleteQuadContainer(Line.m_QuadContainerIndex);
 
 		char aClientId[16] = "";
@@ -1087,6 +1095,7 @@ void CChat::OnPrepareLines(float y)
 		}
 
 		// render name
+		bool UseNameGradient = false;
 		ColorRGBA NameColor;
 		if(Line.m_CustomColor)
 			NameColor = *Line.m_CustomColor;
@@ -1105,11 +1114,30 @@ void CChat::OnPrepareLines(float y)
 		else if(Line.m_ClientId >= 0 && g_Config.m_ClChatTeamColors && GameClient()->m_Teams.Team(Line.m_ClientId))
 			NameColor = GameClient()->GetDDTeamColor(GameClient()->m_Teams.Team(Line.m_ClientId), 0.75f);
 		else
+		{
 			NameColor = ColorRGBA(0.8f, 0.8f, 0.8f, 1.0f);
+			// только для обычного имени (не team/whisper/system цвета)
+			UseNameGradient = Line.m_ClientId >= 0 && Line.m_aName[0] != '\0' && NameGradientAppliesTo(*GameClient(), Line.m_ClientId);
+		}
 
 		TextRender()->TextColor(NameColor);
 		TextRender()->CreateOrAppendTextContainer(Line.m_TextContainerIndex, &LineCursor, aClientId);
-		TextRender()->CreateOrAppendTextContainer(Line.m_TextContainerIndex, &LineCursor, Line.m_aName);
+		if(UseNameGradient)
+		{
+			// сдвигаем курсор на ширину ника без отрисовки, сам ник рисуется отдельно
+			Line.m_NameGradientPos = vec2(LineCursor.m_X, LineCursor.m_Y);
+			CTextCursor NameMeasure = LineCursor;
+			NameMeasure.m_Flags &= ~TEXTFLAG_RENDER;
+			TextRender()->TextEx(&NameMeasure, Line.m_aName);
+			LineCursor = NameMeasure;
+			LineCursor.m_Flags |= TEXTFLAG_RENDER;
+			Line.m_NameGradient.Update(TextRender(), Line.m_aName, FontSize);
+   			Line.m_NameGradientGroup = std::max(0, NameGradientGroup(*GameClient(), Line.m_ClientId));
+		}
+		else
+		{
+			TextRender()->CreateOrAppendTextContainer(Line.m_TextContainerIndex, &LineCursor, Line.m_aName);
+		}
 
 		if(Line.m_TimesRepeated > 0)
 		{
@@ -1334,6 +1362,17 @@ void CChat::OnRender()
 			const ColorRGBA TextColor = TextRender()->DefaultTextColor().WithMultipliedAlpha(Blend);
 			const ColorRGBA TextOutlineColor = TextRender()->DefaultTextOutlineColor().WithMultipliedAlpha(Blend);
 			TextRender()->RenderTextContainer(Line.m_TextContainerIndex, TextColor, TextOutlineColor, 0, (y + RealMsgPaddingY / 2.0f) - Line.m_TextYOffset);
+
+			// NEW: градиентный ник — рисуем отдельно, он не попал в m_TextContainerIndex
+			if(Line.m_NameGradient.Valid())
+			{
+				Line.m_NameGradient.Render(TextRender(),
+					vec2(Line.m_NameGradientPos.x, y + RealMsgPaddingY / 2.0f),
+					SNameGradientParams::FromConfig(Line.m_NameGradientGroup),
+					Client()->LocalTime(),
+					Blend,
+					TextOutlineColor);
+			}
 		}
 	}
 }

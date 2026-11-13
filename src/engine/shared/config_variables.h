@@ -42,6 +42,60 @@ MACRO_CONFIG_INT(ClBackButton, cl_back_button, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG
 MACRO_CONFIG_INT(ClBackButtonX, cl_back_button_x, 5000, 0, 1000000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Relative X position of the draggable back button")
 MACRO_CONFIG_INT(ClBackButtonY, cl_back_button_y, 5000, 0, 1000000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Relative Y position of the draggable back button")
 
+MACRO_CONFIG_INT(ClNameGradient, cl_name_gradient, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Animated name gradient")
+MACRO_CONFIG_INT(ClNameGradientOthers, cl_name_gradient_others, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Also apply name gradient to other players")
+MACRO_CONFIG_INT(ClNameGradientSpeed, cl_name_gradient_speed, 30, 1, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Name gradient speed")
+MACRO_CONFIG_INT(ClNameGradientMode, cl_name_gradient_mode, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Name gradient mode (0 = constant, 1 = linear)")
+MACRO_CONFIG_INT(ClNameGradientWave, cl_name_gradient_wave, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Name gradient wave: 1 = spread over the whole name, 0 = repeat every 3 characters")
+MACRO_CONFIG_COL(ClNameGradientColor1, cl_name_gradient_color1, 65408, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Name gradient color 1")
+MACRO_CONFIG_COL(ClNameGradientColor2, cl_name_gradient_color2, 5635968, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Name gradient color 2")
+MACRO_CONFIG_COL(ClNameGradientColor3, cl_name_gradient_color3, 11206528, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Name gradient color 3")
+
+// Trail
+MACRO_CONFIG_INT(ClTrail, cl_trail, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Enable player trails")
+MACRO_CONFIG_INT(ClTrailSize, cl_trail_size, 8, 1, 50, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Trail segment size")
+MACRO_CONFIG_INT(ClTrailLifetime, cl_trail_lifetime, 1000, 100, 5000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Trail segment lifetime in milliseconds")
+MACRO_CONFIG_INT(ClTrailFadeTime, cl_trail_fade_time, 500, 0, 5000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Trail fade duration in milliseconds (0 = instant disappear)")
+MACRO_CONFIG_INT(ClTrailSpacing, cl_trail_spacing, 15, 1, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Minimum distance between trail segments")
+
+MACRO_CONFIG_INT(ClTrailOwn, cl_trail_own, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Show trail for own tees")
+MACRO_CONFIG_INT(ClTrailOwnColorMode, cl_trail_own_color_mode, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Own trail color mode (0 = solid, 1 = random)")
+MACRO_CONFIG_COL(ClTrailOwnColor, cl_trail_own_color, 65408, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Own trail color")
+
+MACRO_CONFIG_INT(ClTrailFriend, cl_trail_friend, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Show trail for friends")
+MACRO_CONFIG_INT(ClTrailFriendColorMode, cl_trail_friend_color_mode, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Friend trail color mode (0 = solid, 1 = random)")
+MACRO_CONFIG_COL(ClTrailFriendColor, cl_trail_friend_color, 16711808, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Friend trail color")
+
+MACRO_CONFIG_INT(ClTrailOther, cl_trail_other, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Show trail for other players")
+MACRO_CONFIG_INT(ClTrailOtherColorMode, cl_trail_other_color_mode, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Other trail color mode (0 = solid, 1 = random)")
+MACRO_CONFIG_COL(ClTrailOtherColor, cl_trail_other_color, 11206528, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Other trail color")
+
+// Name gradient: own (main, dummy, extra1, extra2)
+MACRO_CONFIG_INT(ClNameGradientOwn, cl_name_gradient_own, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Name gradient for own names (main, dummy, extra)")
+MACRO_CONFIG_INT(ClNameGradientOwnSpeed, cl_name_gradient_own_speed, 30, 1, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Own name gradient speed")
+MACRO_CONFIG_INT(ClNameGradientOwnMode, cl_name_gradient_own_mode, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Own name gradient mode (0 = constant, 1 = linear)")
+MACRO_CONFIG_INT(ClNameGradientOwnWave, cl_name_gradient_own_wave, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Own name gradient: 1 = spread over the whole name, 0 = repeat every 3 characters")
+MACRO_CONFIG_COL(ClNameGradientOwnColor1, cl_name_gradient_own_color1, 65408, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Own name gradient color 1")
+MACRO_CONFIG_COL(ClNameGradientOwnColor2, cl_name_gradient_own_color2, 5635968, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Own name gradient color 2")
+MACRO_CONFIG_COL(ClNameGradientOwnColor3, cl_name_gradient_own_color3, 11206528, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Own name gradient color 3")
+
+// Name gradient: friends
+MACRO_CONFIG_INT(ClNameGradientFriend, cl_name_gradient_friend, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Name gradient for friends")
+MACRO_CONFIG_INT(ClNameGradientFriendSpeed, cl_name_gradient_friend_speed, 30, 1, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Friend name gradient speed")
+MACRO_CONFIG_INT(ClNameGradientFriendMode, cl_name_gradient_friend_mode, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Friend name gradient mode (0 = constant, 1 = linear)")
+MACRO_CONFIG_INT(ClNameGradientFriendWave, cl_name_gradient_friend_wave, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Friend name gradient: 1 = spread over the whole name, 0 = repeat every 3 characters")
+MACRO_CONFIG_COL(ClNameGradientFriendColor1, cl_name_gradient_friend_color1, 15335296, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Friend name gradient color 1")
+MACRO_CONFIG_COL(ClNameGradientFriendColor2, cl_name_gradient_friend_color2, 1376128, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Friend name gradient color 2")
+MACRO_CONFIG_COL(ClNameGradientFriendColor3, cl_name_gradient_friend_color3, 2686848, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Friend name gradient color 3")
+
+// Name gradient: everyone else
+MACRO_CONFIG_INT(ClNameGradientOther, cl_name_gradient_other, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Name gradient for other players (more draw calls)")
+MACRO_CONFIG_INT(ClNameGradientOtherSpeed, cl_name_gradient_other_speed, 30, 1, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Other players name gradient speed")
+MACRO_CONFIG_INT(ClNameGradientOtherMode, cl_name_gradient_other_mode, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Other players name gradient mode (0 = constant, 1 = linear)")
+MACRO_CONFIG_INT(ClNameGradientOtherWave, cl_name_gradient_other_wave, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Other players name gradient: 1 = spread over the whole name, 0 = repeat every 3 characters")
+MACRO_CONFIG_COL(ClNameGradientOtherColor1, cl_name_gradient_other_color1, 8454016, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Other players name gradient color 1")
+MACRO_CONFIG_COL(ClNameGradientOtherColor2, cl_name_gradient_other_color2, 13172608, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Other players name gradient color 2")
+MACRO_CONFIG_COL(ClNameGradientOtherColor3, cl_name_gradient_other_color3, 11206528, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Other players name gradient color 3")
 MACRO_CONFIG_INT(ClNamePlates, cl_nameplates, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Show name plates")
 MACRO_CONFIG_INT(ClNamePlatesAlways, cl_nameplates_always, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Always show name plates regardless of distance")
 MACRO_CONFIG_INT(ClNamePlatesTeamcolors, cl_nameplates_teamcolors, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Use team colors for name plates")

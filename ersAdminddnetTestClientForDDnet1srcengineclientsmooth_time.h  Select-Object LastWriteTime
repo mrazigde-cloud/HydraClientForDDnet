@@ -1,0 +1,371 @@
+[1mdiff --git a/src/engine/client/client.cpp b/src/engine/client/client.cpp[m
+[1mindex 67806c88b..c2a9495d3 100644[m
+[1m--- a/src/engine/client/client.cpp[m
+[1m+++ b/src/engine/client/client.cpp[m
+[36m@@ -423,7 +423,7 @@[m [mvoid CClient::SendInput()[m
+ 		{[m
+ 			Size = GameClient()->OnSnapInput(m_aInputs[i][m_aCurrentInput[i]].m_aData, Dummy, Force);[m
+ [m
+[31m-			if(!Dummy && m_aSuppressFireTicks[i] > 0)[m
+[32m+[m			[32mif(m_aSuppressFireTicks[i] > 0)[m
+ 			{[m
+ 				m_aSuppressFireTicks[i]--;[m
+ 				if(Size >= (int)sizeof(CNetObj_PlayerInput))[m
+[36m@@ -650,7 +650,7 @@[m [mvoid CClient::SetState(EClientState State)[m
+ // called when the map is loaded and we should init for a new round[m
+ void CClient::OnEnterGame(bool Dummy)[m
+ {[m
+[31m-	// reset input[m
+[32m+[m	[32m// reset input (m_aInputs и m_aCurrentInput — размера NUM_CONNS, безопасно для любых Conn)[m
+ 	for(int i = 0; i < 200; i++)[m
+ 	{[m
+ 		m_aInputs[Dummy][i].m_Tick = -1;[m
+[36m@@ -661,7 +661,7 @@[m [mvoid CClient::OnEnterGame(bool Dummy)[m
+ 	if(Dummy == 1)[m
+ 		GameClient()->ResetPlayerInput(1);[m
+ [m
+[31m-	// reset snapshots[m
+[32m+[m	[32m// reset snapshots (m_aapSnapshots и m_aSnapshotStorage — тоже NUM_CONNS)[m
+ 	m_aapSnapshots[Dummy][SNAP_CURRENT] = nullptr;[m
+ 	m_aapSnapshots[Dummy][SNAP_PREV] = nullptr;[m
+ 	m_aSnapshotStorage[Dummy].PurgeAll();[m
+[36m@@ -672,17 +672,24 @@[m [mvoid CClient::OnEnterGame(bool Dummy)[m
+ 	// Also make gameclient aware that snapshots have been purged[m
+ 	GameClient()->InvalidateSnapshot();[m
+ [m
+[31m-	// reset times[m
+ 	m_aAckGameTick[Dummy] = -1;[m
+ 	m_aCurrentRecvTick[Dummy] = 0;[m
+[31m-	m_aPrevGameTick[Dummy] = 0;[m
+[31m-	m_aCurGameTick[Dummy] = 0;[m
+[31m-	m_aGameIntraTick[Dummy] = 0.0f;[m
+[31m-	m_aGameTickTime[Dummy] = 0.0f;[m
+[31m-	m_aGameIntraTickSincePrev[Dummy] = 0.0f;[m
+[31m-	m_aPredTick[Dummy] = 0;[m
+[31m-	m_aPredIntraTick[Dummy] = 0.0f;[m
+[31m-	m_aGameTime[Dummy].Init(0);[m
+[32m+[m
+[32m+[m	[32m// Временные массивы IClient имеют размер NUM_DUMMIES. Писать в [2]/[3][m
+[32m+[m	[32m// нельзя — это OOB. Для extra пропускаем эту часть, тайминг будет[m
+[32m+[m	[32m// восстановлен через m_PredictedTime / m_aGameTime при первом снапшоте.[m
+[32m+[m	[32mif(Dummy < NUM_DUMMIES)[m
+[32m+[m	[32m{[m
+[32m+[m		[32mm_aPrevGameTick[Dummy] = 0;[m
+[32m+[m		[32mm_aCurGameTick[Dummy] = 0;[m
+[32m+[m		[32mm_aGameIntraTick[Dummy] = 0.0f;[m
+[32m+[m		[32mm_aGameTickTime[Dummy] = 0.0f;[m
+[32m+[m		[32mm_aGameIntraTickSincePrev[Dummy] = 0.0f;[m
+[32m+[m		[32mm_aPredTick[Dummy] = 0;[m
+[32m+[m		[32mm_aPredIntraTick[Dummy] = 0.0f;[m
+[32m+[m		[32mm_aGameTime[Dummy].Init(0);[m
+[32m+[m	[32m}[m
+[32m+[m
+ 	m_PredictedTime.Init(0);[m
+ [m
+ 	if(!Dummy)[m
+[36m@@ -692,7 +699,6 @@[m [mvoid CClient::OnEnterGame(bool Dummy)[m
+ [m
+ 	GameClient()->OnEnterGame();[m
+ }[m
+[31m-[m
+ void CClient::EnterGame(int Conn)[m
+ {[m
+ 	if(State() == IClient::STATE_DEMOPLAYBACK)[m
+[36m@@ -1932,6 +1938,10 @@[m [mvoid CClient::ProcessServerPacket(CNetChunk *pPacket, int Conn, bool Dummy)[m
+ 				DummyDisconnect(nullptr);[m
+ 			}[m
+ [m
+[32m+[m			[32m// Extra-соединения привязаны к старой карте, отключаем их[m
+[32m+[m			[32mfor(int ExtraIdx = 0; ExtraIdx < IClient::NUM_EXTRA_CONNS; ExtraIdx++)[m
+[32m+[m				[32mExtraDisconnect(ExtraIdx);[m
+[32m+[m
+ 			ResetMapDownload(true);[m
+ [m
+ 			std::optional<SHA256_DIGEST> MapSha256;[m
+[36m@@ -2088,6 +2098,8 @@[m [mvoid CClient::ProcessServerPacket(CNetChunk *pPacket, int Conn, bool Dummy)[m
+ 			m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "client", "Extra connection ready.");[m
+ 			SendEnterGame(Conn);[m
+ 			m_aDidPostConnect[Conn] = false;[m
+[32m+[m			[32mif(g_Config.m_ClExtraAutoSwitch)[m
+[32m+[m				[32mSwitchControlToExtra(Conn);[m
+ 		}[m
+ 		else if(Conn == CONN_MAIN && (pPacket->m_Flags & NET_CHUNKFLAG_VITAL) != 0 && Msg == NETMSG_CON_READY)[m
+ 		{[m
+[36m@@ -2113,7 +2125,9 @@[m [mvoid CClient::ProcessServerPacket(CNetChunk *pPacket, int Conn, bool Dummy)[m
+ 		{[m
+ 			m_DummyConnected = true;[m
+ 			m_DummyConnecting = false;[m
+[31m-			g_Config.m_ClDummy = 1;[m
+[32m+[m			[32m//Переключаемся на дамми только если включена автосмена[m
+[32m+[m			[32mif(g_Config.m_ClExtraAutoSwitch)[m
+[32m+[m				[32mg_Config.m_ClDummy = 1;[m
+ 			Rcon("crashmeplx");[m
+ 			if(m_aRconAuthed[0] && !m_aRconAuthed[1])[m
+ 				RconAuth(m_aRconUsername, m_aRconPassword);[m
+[36m@@ -2253,15 +2267,11 @@[m [mvoid CClient::ProcessServerPacket(CNetChunk *pPacket, int Conn, bool Dummy)[m
+ 		}[m
+ 		else if(Msg == NETMSG_INPUTTIMING)[m
+ 		{[m
+[31m-			if(g_Config.m_ClDummy != 0)[m
+[31m-			{[m
+[31m-				if(Conn != CONN_DUMMY)[m
+[31m-					return;[m
+[31m-			}[m
+[31m-			else if(Conn != CONN_DUMMY && Conn != m_ActiveConn)[m
+[31m-			{[m
+[32m+[m			[32mconst int TimingConn = (IClient::IsExtraConn(m_ActiveConn) && !g_Config.m_ClDummy) ?[m
+[32m+[m						[32m       m_ActiveConn :[m
+[32m+[m						[32m       (g_Config.m_ClDummy ? (int)CONN_DUMMY : (int)CONN_MAIN);[m
+[32m+[m			[32mif(Conn != TimingConn)[m
+ 				return;[m
+[31m-			}[m
+ [m
+ 			int InputPredTick = Unpacker.GetInt();[m
+ 			int TimeLeft = Unpacker.GetInt();[m
+[36m@@ -2283,6 +2293,13 @@[m [mvoid CClient::ProcessServerPacket(CNetChunk *pPacket, int Conn, bool Dummy)[m
+ 					break;[m
+ 				}[m
+ 			}[m
+[32m+[m			[32mstatic int64_t s_aLastTimingLog[NUM_CONNS] = {};[m
+[32m+[m			[32mif(time_get() > s_aLastTimingLog[Conn] + time_freq() / 2)[m
+[32m+[m			[32m{[m
+[32m+[m				[32ms_aLastTimingLog[Conn] = time_get();[m
+[32m+[m				[32mlog_info("timing_dbg", "conn=%d input_tick=%d predtick=%d timeleft_ms=%d target_found=%d pred_ms=%d",[m
+[32m+[m					[32mConn, InputPredTick, m_aPredTick[g_Config.m_ClDummy], TimeLeft, Target != 0, GetPredictionTime());[m
+[32m+[m			[32m}[m
+ [m
+ 			if(Target)[m
+ 				m_PredictedTime.Update(&m_aInputtimeMarginGraphs[Conn], Target, TimeLeft, CSmoothTime::ADJUSTDIRECTION_UP);[m
+[36m@@ -2366,6 +2383,17 @@[m [mvoid CClient::ProcessServerPacket(CNetChunk *pPacket, int Conn, bool Dummy)[m
+ 						if(AltSnapSize < 0)[m
+ 							return;[m
+ [m
+[32m+[m						[32m// purge старых снапшотов, как в оригинале для main[m
+[32m+[m						[32mint PurgeTick = DeltaTick;[m
+[32m+[m						[32mif(m_ActiveConn == Conn)[m
+[32m+[m						[32m{[m
+[32m+[m							[32mif(m_aapExtraSnapshots[ExtraIdx][SNAP_PREV] && m_aapExtraSnapshots[ExtraIdx][SNAP_PREV]->m_Tick < PurgeTick)[m
+[32m+[m								[32mPurgeTick = m_aapExtraSnapshots[ExtraIdx][SNAP_PREV]->m_Tick;[m
+[32m+[m							[32mif(m_aapExtraSnapshots[ExtraIdx][SNAP_CURRENT] && m_aapExtraSnapshots[ExtraIdx][SNAP_CURRENT]->m_Tick < PurgeTick)[m
+[32m+[m								[32mPurgeTick = m_aapExtraSnapshots[ExtraIdx][SNAP_CURRENT]->m_Tick;[m
+[32m+[m						[32m}[m
+[32m+[m						[32mm_aExtraSnapshotStorage[ExtraIdx].PurgeUntil(PurgeTick);[m
+[32m+[m
+ 						m_aExtraSnapshotStorage[ExtraIdx].Add(GameTick, time_get(), SnapSize, TmpBuffer3.AsSnapshot(), AltSnapSize, AltSnapBuffer.AsSnapshot());[m
+ [m
+ 						if(m_ActiveConn == Conn)[m
+[36m@@ -2378,18 +2406,31 @@[m [mvoid CClient::ProcessServerPacket(CNetChunk *pPacket, int Conn, bool Dummy)[m
+ 								m_aapSnapshots[Conn][SNAP_PREV] = m_aapExtraSnapshots[ExtraIdx][SNAP_PREV];[m
+ 								m_aapSnapshots[Conn][SNAP_CURRENT] = m_aapExtraSnapshots[ExtraIdx][SNAP_CURRENT];[m
+ [m
+[31m-								m_aCurGameTick[g_Config.m_ClDummy] = m_aapExtraSnapshots[ExtraIdx][SNAP_CURRENT]->m_Tick;[m
+[31m-								m_aPrevGameTick[g_Config.m_ClDummy] = m_aapExtraSnapshots[ExtraIdx][SNAP_PREV]->m_Tick;[m
+[31m-								m_PredictedTime.Init(m_aCurGameTick[g_Config.m_ClDummy] * time_freq() / GameTickSpeed());[m
+[31m-								m_PredictedTime.SetAdjustSpeed(CSmoothTime::ADJUSTDIRECTION_UP, 1000.0f);[m
+[31m-								m_PredictedTime.UpdateMargin(PredictionMargin() * time_freq() / 1000);[m
+[31m-								m_aGameTime[g_Config.m_ClDummy].Init((m_aCurGameTick[g_Config.m_ClDummy] - 1) * time_freq() / GameTickSpeed());[m
+[31m-								m_aPredTick[g_Config.m_ClDummy] = m_aCurGameTick[g_Config.m_ClDummy] + 1;[m
+[32m+[m								[32m// ФИКС: Защита от краша при пустом снапшоте[m
+[32m+[m								[32mif(m_aapExtraSnapshots[ExtraIdx][SNAP_CURRENT] && m_aapExtraSnapshots[ExtraIdx][SNAP_PREV])[m
+[32m+[m								[32m{[m
+[32m+[m									[32mm_aCurGameTick[g_Config.m_ClDummy] = m_aapExtraSnapshots[ExtraIdx][SNAP_CURRENT]->m_Tick;[m
+[32m+[m									[32mm_aPrevGameTick[g_Config.m_ClDummy] = m_aapExtraSnapshots[ExtraIdx][SNAP_PREV]->m_Tick;[m
+[32m+[m								[32m}[m
+[32m+[m								[32melse[m
+[32m+[m								[32m{[m
+[32m+[m									[32mreturn; // Если данных нет — прерываем обработку, чтобы не крашить игру[m
+[32m+[m								[32m}[m
+ 								m_aLastExtraSentTick[ExtraIdx] = -1;[m
+ [m
+ 								GameClient()->OnNewSnapshot(false);[m
+ 							}[m
+ 							m_aExtraReceivedSnapshots[ExtraIdx]++;[m
+[32m+[m
+[32m+[m							[32m// игровое время подстраиваем один раз на снапшот, как у main[m
+[32m+[m							[32mif(m_aExtraReceivedSnapshots[ExtraIdx] > 2)[m
+[32m+[m							[32m{[m
+[32m+[m								[32mint64_t NowGame = m_aGameTime[g_Config.m_ClDummy].Get(time_get());[m
+[32m+[m								[32mint64_t TickStart = GameTick * time_freq() / GameTickSpeed();[m
+[32m+[m								[32mint64_t TimeLeft = (TickStart - NowGame) * 1000 / time_freq();[m
+[32m+[m								[32mm_aGameTime[g_Config.m_ClDummy].Update(&m_aGametimeMarginGraphs[g_Config.m_ClDummy],[m
+[32m+[m									[32m(GameTick - 1) * time_freq() / GameTickSpeed(), TimeLeft, CSmoothTime::ADJUSTDIRECTION_DOWN);[m
+[32m+[m							[32m}[m
+ 						}[m
+ [m
+ 						if(GameTick > m_aAckGameTick[Conn])[m
+[36m@@ -3306,15 +3347,6 @@[m [mvoid CClient::Update()[m
+ 					m_aPredTick[g_Config.m_ClDummy] = NewPredTick;[m
+ 					Repredict = true;[m
+ 				}[m
+[31m-[m
+[31m-				if(m_aExtraReceivedSnapshots[ActiveExtraIdx] > 2)[m
+[31m-				{[m
+[31m-					int64_t NowSmooth = m_aGameTime[g_Config.m_ClDummy].Get(time_get());[m
+[31m-					int64_t TimeLeft = (CurTickStart - NowSmooth) * 1000 / time_freq();[m
+[31m-					m_aGameTime[g_Config.m_ClDummy].Update(&m_aGametimeMarginGraphs[g_Config.m_ClDummy],[m
+[31m-						(m_aapExtraSnapshots[ActiveExtraIdx][SNAP_CURRENT]->m_Tick - 1) * time_freq() / GameTickSpeed(),[m
+[31m-						TimeLeft, CSmoothTime::ADJUSTDIRECTION_DOWN);[m
+[31m-				}[m
+ 			}[m
+ [m
+ 			// Если тик откатился (переключение main↔extra), сбрасываем, чтобы не блокировать отправку[m
+[36m@@ -3325,7 +3357,17 @@[m [mvoid CClient::Update()[m
+ 				m_aLastExtraSentTick[ActiveExtraIdx] = m_aPredTick[g_Config.m_ClDummy];[m
+ 				SendInput();[m
+ 			}[m
+[31m-[m
+[32m+[m			[32mstatic int64_t s_LastExtraLog = 0;[m
+[32m+[m			[32mif(time_get() > s_LastExtraLog + time_freq())[m
+[32m+[m			[32m{[m
+[32m+[m				[32ms_LastExtraLog = time_get();[m
+[32m+[m				[32mconst int64_t NowT = time_get();[m
+[32m+[m				[32mlog_info("extra_dbg", "cur=%d pred=%d gametime_tick=%d predtime_tick=%d pred_ms=%d snaps=%d",[m
+[32m+[m					[32mm_aCurGameTick[g_Config.m_ClDummy], m_aPredTick[g_Config.m_ClDummy],[m
+[32m+[m					[32m(int)(m_aGameTime[g_Config.m_ClDummy].Get(NowT) * GameTickSpeed() / time_freq()),[m
+[32m+[m					[32m(int)(m_PredictedTime.Get(NowT) * GameTickSpeed() / time_freq()),[m
+[32m+[m					[32mGetPredictionTime(), m_aExtraReceivedSnapshots[ActiveExtraIdx]);[m
+[32m+[m			[32m}[m
+ 			if(Repredict)[m
+ 			{[m
+ 				if(m_aPredTick[g_Config.m_ClDummy] > m_aCurGameTick[g_Config.m_ClDummy] &&[m
+[36m@@ -4235,10 +4277,12 @@[m [mvoid CClient::Con_ToggleExtra(IConsole::IResult *pResult, void *pUserData)[m
+ [m
+ 	// Восстановить main snapshots (общий код для переходов на main)[m
+ 	auto SwitchToMain = [pSelf]() {[m
+[32m+[m
+ 		g_Config.m_ClDummy = 0;[m
+ 		pSelf->m_ActiveConn = CONN_MAIN;[m
+[31m-		pSelf->m_aSuppressFireTicks[CONN_MAIN] = 3;[m
+[32m+[m		[32mpSelf->m_aSuppressFireTicks[CONN_MAIN] = 5;[m
+ 		pSelf->GameClient()->ClearPreInputs();[m
+[32m+[m		[32mpSelf->GameClient()->ForceSnapInput();[m
+ 		auto &MainStorage = pSelf->m_aSnapshotStorage[CONN_MAIN];[m
+ 		CSnapshotStorage::CHolder *pCur = MainStorage.m_pLast;[m
+ 		CSnapshotStorage::CHolder *pPrev = nullptr;[m
+[36m@@ -4257,11 +4301,6 @@[m [mvoid CClient::Con_ToggleExtra(IConsole::IResult *pResult, void *pUserData)[m
+ 			pSelf->m_aapSnapshots[CONN_MAIN][SNAP_PREV] = pPrev;[m
+ 			pSelf->m_aCurGameTick[0] = pCur->m_Tick;[m
+ 			pSelf->m_aPrevGameTick[0] = pPrev->m_Tick;[m
+[31m-			pSelf->m_aPredTick[0] = pCur->m_Tick + 1;[m
+[31m-			pSelf->m_PredictedTime.Init(pCur->m_Tick * time_freq() / pSelf->GameTickSpeed());[m
+[31m-			pSelf->m_PredictedTime.SetAdjustSpeed(CSmoothTime::ADJUSTDIRECTION_UP, 1000.0f);[m
+[31m-			pSelf->m_PredictedTime.UpdateMargin(pSelf->PredictionMargin() * time_freq() / 1000);[m
+[31m-			pSelf->m_aGameTime[0].Init((pCur->m_Tick - 1) * time_freq() / pSelf->GameTickSpeed());[m
+ 			MainStorage.PurgeUntil(pPrev->m_Tick);[m
+ 			pSelf->GameClient()->InvalidateSnapshot();[m
+ 			pSelf->GameClient()->OnNewSnapshot(true);[m
+[36m@@ -4270,27 +4309,20 @@[m [mvoid CClient::Con_ToggleExtra(IConsole::IResult *pResult, void *pUserData)[m
+ 	};[m
+ [m
+ 	auto SwitchToExtra = [pSelf](int Conn) {[m
+[31m-		g_Config.m_ClDummy = 0;[m
+[31m-		pSelf->m_ActiveConn = Conn;[m
+[31m-		pSelf->m_aSuppressFireTicks[Conn] = 3;[m
+[31m-		pSelf->GameClient()->ClearPreInputs();[m
+[31m-		const int Idx = IClient::ExtraConnToIndex(Conn);[m
+[31m-		pSelf->m_aLastExtraSentTick[Idx] = -1;[m
+[31m-		pSelf->m_aExtraReceivedSnapshots[Idx] = 0;[m
+[31m-		pSelf->m_aapExtraSnapshots[Idx][SNAP_CURRENT] = nullptr;[m
+[31m-		pSelf->m_aapExtraSnapshots[Idx][SNAP_PREV] = nullptr;[m
+[31m-		pSelf->m_aapSnapshots[Conn][SNAP_CURRENT] = nullptr;[m
+[31m-		pSelf->m_aapSnapshots[Conn][SNAP_PREV] = nullptr;[m
+[31m-		pSelf->GameClient()->InvalidateSnapshot();[m
+[31m-		char aBuf[64];[m
+[31m-		str_format(aBuf, sizeof(aBuf), "== Control: EXTRA%d ==", Idx + 1);[m
+[31m-		pSelf->m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "client", aBuf);[m
+[32m+[m		[32mpSelf->SwitchControlToExtra(Conn);[m
+ 	};[m
+ [m
+ 	auto SwitchToDummy = [pSelf]() {[m
+[32m+[m		[32mconst int OldConn = pSelf->m_ActiveConn;[m
+[32m+[m		[32mif(OldConn >= 0 && OldConn < NUM_CONNS)[m
+[32m+[m		[32m{[m
+[32m+[m			[32mconst int PrevIdx = (pSelf->m_aCurrentInput[OldConn] + 199) % 200;[m
+[32m+[m			[32mconst auto *pPrev = (const CNetObj_PlayerInput *)pSelf->m_aInputs[OldConn][PrevIdx].m_aData;[m
+[32m+[m		[32m}[m
+[32m+[m
+ 		g_Config.m_ClDummy = 1;[m
+ 		pSelf->m_ActiveConn = CONN_MAIN;[m
+[31m-		pSelf->m_aSuppressFireTicks[CONN_DUMMY] = 3;[m
+[32m+[m		[32mpSelf->m_aSuppressFireTicks[CONN_DUMMY] = 5;[m
+ 		pSelf->GameClient()->ClearPreInputs();[m
+ 		pSelf->m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "client", "== Control: DUMMY ==");[m
+ 	};[m
+[36m@@ -4339,6 +4371,68 @@[m [mvoid CClient::Con_ToggleExtra(IConsole::IResult *pResult, void *pUserData)[m
+ 		return;[m
+ 	}[m
+ }[m
+[32m+[m[32mvoid CClient::SwitchControlToExtra(int Conn)[m
+[32m+[m[32m{[m
+[32m+[m	[32mg_Config.m_ClDummy = 0;[m
+[32m+[m	[32mm_ActiveConn = Conn;[m
+[32m+[m	[32mm_aSuppressFireTicks[Conn] = 5;[m
+[32m+[m
+[32m+[m	[32mfor(int i = 0; i < 200; i++)[m
+[32m+[m	[32m{[m
+[32m+[m		[32mauto *pInput = (CNetObj_PlayerInput *)m_aInputs[Conn][i].m_aData;[m
+[32m+[m		[32mpInput->m_Fire = 0;[m
+[32m+[m		[32mpInput->m_Hook = 0;[m
+[32m+[m		[32mpInput->m_Jump = 0;[m
+[32m+[m		[32mpInput->m_Direction = 0;[m
+[32m+[m	[32m}[m
+[32m+[m
+[32m+[m	[32mGameClient()->ForceSnapInput();[m
+[32m+[m	[32mGameClient()->ClearPreInputs();[m
+[32m+[m	[32mconst int Idx = IClient::ExtraConnToIndex(Conn);[m
+[32m+[m	[32mm_aLastExtraSentTick[Idx] = -1;[m
+[32m+[m	[32mm_aExtraReceivedSnapshots[Idx] = 0;[m
+[32m+[m
+[32m+[m	[32m// Восстанавливаем снапшоты из storage сразу, как делает SwitchToMain,[m
+[32m+[m	[32m// чтобы HUD не пропадал на время ожидания следующего пакета от extra.[m
+[32m+[m	[32mauto &ExtraStorage = m_aExtraSnapshotStorage[Idx];[m
+[32m+[m	[32mCSnapshotStorage::CHolder *pCur = ExtraStorage.m_pLast;[m
+[32m+[m	[32mCSnapshotStorage::CHolder *pPrev = nullptr;[m
+[32m+[m	[32mif(pCur)[m
+[32m+[m	[32m{[m
+[32m+[m		[32mfor(auto *p = ExtraStorage.m_pFirst; p && p->m_pNext; p = p->m_pNext)[m
+[32m+[m		[32m{[m
+[32m+[m			[32mif(p->m_pNext == pCur)[m
+[32m+[m			[32m{[m
+[32m+[m				[32mpPrev = p;[m
+[32m+[m				[32mbreak;[m
+[32m+[m			[32m}[m
+[32m+[m		[32m}[m
+[32m+[m	[32m}[m
+[32m+[m
+[32m+[m	[32mif(pCur && pPrev)[m
+[32m+[m	[32m{[m
+[32m+[m		[32mm_aapExtraSnapshots[Idx][SNAP_CURRENT] = pCur;[m
+[32m+[m		[32mm_aapExtraSnapshots[Idx][SNAP_PREV] = pPrev;[m
+[32m+[m		[32mm_aapSnapshots[Conn][SNAP_CURRENT] = pCur;[m
+[32m+[m		[32mm_aapSnapshots[Conn][SNAP_PREV] = pPrev;[m
+[32m+[m		[32mm_aCurGameTick[0] = pCur->m_Tick;[m
+[32m+[m		[32mm_aPrevGameTick[0] = pPrev->m_Tick;[m
+[32m+[m		[32mExtraStorage.PurgeUntil(pPrev->m_Tick);[m
+[32m+[m		[32mGameClient()->OnNewSnapshot(false);   // OnNewSnapshot сам делает InvalidateSnapshot[m
+[32m+[m	[32m}[m
+[32m+[m	[32melse[m
+[32m+[m	[32m{[m
+[32m+[m		[32mm_aapExtraSnapshots[Idx][SNAP_CURRENT] = nullptr;[m
+[32m+[m		[32mm_aapExtraSnapshots[Idx][SNAP_PREV] = nullptr;[m
+[32m+[m		[32mm_aapSnapshots[Conn][SNAP_CURRENT] = nullptr;[m
+[32m+[m		[32mm_aapSnapshots[Conn][SNAP_PREV] = nullptr;[m
+[32m+[m		[32mGameClient()->InvalidateSnapshot();[m
+[32m+[m	[32m}[m
+[32m+[m
+[32m+[m	[32mchar aBuf[64];[m
+[32m+[m	[32mstr_format(aBuf, sizeof(aBuf), "== Control: EXTRA%d ==", Idx + 1);[m
+[32m+[m	[32mm_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "client", aBuf);[m
+[32m+[m[32m}[m
+ void CClient::ExtraDisconnect(int Index)[m
+ {[m
+ 	if(Index < 0 || Index >= IClient::NUM_EXTRA_CONNS)[m
+[36m@@ -6198,7 +6292,7 @@[m [mint CClient::MaxLatencyTicks() const[m
+ [m
+ int CClient::PredictionMargin() const[m
+ {[m
+[31m-	return m_ServerCapabilities.m_SyncWeaponInput ? g_Config.m_ClPredictionMargin : 10;[m
+[32m+[m	[32mreturn g_Config.m_ClPredictionMargin;[m
+ }[m
+ [m
+ IClient::EConnectivity CClient::UdpConnectivity(int NetType)[m

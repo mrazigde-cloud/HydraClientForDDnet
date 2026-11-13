@@ -21,6 +21,7 @@
 #include <game/client/animstate.h>
 #include <game/client/components/scoreboard.h>
 #include <game/client/gameclient.h>
+#include <game/client/gradient_name.h>
 #include <game/client/prediction/entities/character.h>
 #include <game/layers.h>
 #include <game/localization.h>
@@ -1309,10 +1310,17 @@ void CHud::RenderSpectatorCount()
 	{
 		StartY -= 56;
 	}
-
-	if(g_Config.m_ClShowhudDummyActions && !(GameClient()->m_Snap.m_pGameInfoObj->m_GameStateFlags & GAMESTATEFLAG_GAMEOVER) && Client()->DummyConnected())
 	{
-		StartY = StartY - 29.0f - 4; // dummy actions height and padding
+		const bool DummyConnected = Client()->DummyConnected();
+		const bool ExtraConnected = Client()->IsExtraConnOnline(IClient::CONN_EXTRA1) || Client()->IsExtraConnOnline(IClient::CONN_EXTRA2);
+		const bool CopyMovesRelevant = g_Config.m_ClDummyCopyMoves && (DummyConnected || ExtraConnected);
+		if(g_Config.m_ClShowhudDummyActions &&
+			!(GameClient()->m_Snap.m_pGameInfoObj->m_GameStateFlags & GAMESTATEFLAG_GAMEOVER) &&
+			(DummyConnected || CopyMovesRelevant))
+		{
+			const float DummyActionsBoxHeight = DummyConnected ? 29.0f : 15.0f;
+			StartY = StartY - DummyActionsBoxHeight - 4;
+		}
 	}
 
 	Graphics()->DrawRect(StartX, StartY, BoxWidth, BoxHeight, ColorRGBA(0.0f, 0.0f, 0.0f, 0.4f), IGraphics::CORNER_L, 5.0f);
@@ -1328,12 +1336,22 @@ void CHud::RenderSpectatorCount()
 
 void CHud::RenderDummyActions()
 {
-	if(!g_Config.m_ClShowhudDummyActions || (GameClient()->m_Snap.m_pGameInfoObj->m_GameStateFlags & GAMESTATEFLAG_GAMEOVER) || !Client()->DummyConnected())
+	const bool DummyConnected = Client()->DummyConnected();
+	const bool ExtraConnected = Client()->IsExtraConnOnline(IClient::CONN_EXTRA1) || Client()->IsExtraConnOnline(IClient::CONN_EXTRA2);
+	// Copy moves имеет смысл только когда есть куда копировать — то есть
+	// помимо main подключён хотя бы один dummy или extra.
+	const bool CopyMoves = g_Config.m_ClDummyCopyMoves && (DummyConnected || ExtraConnected);
+	// Копирование движений влияет на все соединения (main, dummy, extra1, extra2),
+	// поэтому индикатор должен показываться даже без dummy — но только если
+	// реально есть второе соединение.
+	if(!g_Config.m_ClShowhudDummyActions ||
+		(GameClient()->m_Snap.m_pGameInfoObj->m_GameStateFlags & GAMESTATEFLAG_GAMEOVER) ||
+		(!DummyConnected && !CopyMoves))
 	{
 		return;
 	}
 	// render small dummy actions hud
-	const float BoxHeight = 29.0f;
+	const float BoxHeight = DummyConnected ? 29.0f : 15.0f;
 	const float BoxWidth = 16.0f;
 
 	float StartX = m_Width - BoxWidth;
@@ -1353,16 +1371,21 @@ void CHud::RenderDummyActions()
 
 	float y = StartY + 2;
 	float x = StartX + 2;
-	Graphics()->SetColor(1.0f, 1.0f, 1.0f, 0.4f);
-	if(g_Config.m_ClDummyHammer)
+	// Hammer-иконка показывается только когда dummy реально подключён.
+	if(DummyConnected)
 	{
-		Graphics()->SetColor(1.0f, 1.0f, 1.0f, 1.0f);
+		Graphics()->SetColor(1.0f, 1.0f, 1.0f, 0.4f);
+		if(g_Config.m_ClDummyHammer)
+		{
+			Graphics()->SetColor(1.0f, 1.0f, 1.0f, 1.0f);
+		}
+		Graphics()->TextureSet(GameClient()->m_HudSkin.m_SpriteHudDummyHammer);
+		Graphics()->RenderQuadContainerAsSprite(m_HudQuadContainerIndex, m_DummyHammerOffset, x, y);
+		y += 13;
 	}
-	Graphics()->TextureSet(GameClient()->m_HudSkin.m_SpriteHudDummyHammer);
-	Graphics()->RenderQuadContainerAsSprite(m_HudQuadContainerIndex, m_DummyHammerOffset, x, y);
-	y += 13;
+	// Copy-иконка показывается всегда, когда copy_moves включён.
 	Graphics()->SetColor(1.0f, 1.0f, 1.0f, 0.4f);
-	if(g_Config.m_ClDummyCopyMoves)
+	if(CopyMoves)
 	{
 		Graphics()->SetColor(1.0f, 1.0f, 1.0f, 1.0f);
 	}

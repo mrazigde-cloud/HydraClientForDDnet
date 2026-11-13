@@ -414,6 +414,182 @@ bool CMenus::RenderHslaScrollbars(CUIRect *pRect, unsigned int *pColor, bool Alp
 void CMenus::RenderSettingsTestClient(CUIRect MainView)
 {
 	CUIRect Label, Button, Left, Right, Middle;
+	// ***** Sub tabs ***** //
+	enum
+	{
+		TESTCLIENT_TAB_GENERAL = 0,
+		TESTCLIENT_TAB_NAME_GRADIENT = 1,
+		TESTCLIENT_TAB_TRAIL = 2,
+		NUMBER_OF_TESTCLIENT_TABS = 3,
+	};
+	static int s_CurTab = TESTCLIENT_TAB_GENERAL;
+	{
+		CUIRect TabBar;
+		MainView.HSplitTop(20.0f, &TabBar, &MainView);
+		MainView.HSplitTop(10.0f, nullptr, &MainView);
+		const float TabWidth = TabBar.w / (float)NUMBER_OF_TESTCLIENT_TABS;
+		static CButtonContainer s_aTabs[NUMBER_OF_TESTCLIENT_TABS] = {};
+		const char *apTabNames[NUMBER_OF_TESTCLIENT_TABS] = {
+			Localize("General"),
+			Localize("Name Gradient"),
+			Localize("Trail")};
+		for(int Tab = 0; Tab < NUMBER_OF_TESTCLIENT_TABS; ++Tab)
+		{
+			TabBar.VSplitLeft(TabWidth, &Button, &TabBar);
+			const int Corners = Tab == 0 ? IGraphics::CORNER_L : (Tab == NUMBER_OF_TESTCLIENT_TABS - 1 ? IGraphics::CORNER_R : IGraphics::CORNER_NONE);
+			if(DoButton_MenuTab(&s_aTabs[Tab], apTabNames[Tab], s_CurTab == Tab, &Button, Corners, nullptr, nullptr, nullptr, nullptr, 4.0f))
+				s_CurTab = Tab;
+		}
+	}
+
+	// ***** Name Gradient tab ***** //
+	// ***** Name Gradient tab ***** //
+	if(s_CurTab == TESTCLIENT_TAB_NAME_GRADIENT)
+	{
+		const float LineSize = 20.0f;
+		const float ColorPickerLineSize = 25.0f;
+		const float ColorPickerLabelSize = 13.0f;
+		const float ColorPickerLineSpacing = 5.0f;
+		const float HeadlineFontSize = 20.0f;
+		const float HeadlineHeight = 30.0f;
+		const float MarginSmall = 5.0f;
+
+		static int s_aModeButtons[3][2];
+		static CButtonContainer s_aColorButtons[3][3];
+
+		auto DoGroup = [&](int Index, CUIRect View, const char *pTitle, int *pEnable, int *pSpeed, int *pMode, int *pWave,
+					unsigned int *pColor1, unsigned int *pColor2, unsigned int *pColor3,
+					ColorRGBA Default1, ColorRGBA Default2, ColorRGBA Default3) {
+			CUIRect Row, ModeConstant, ModeLinear;
+			Ui()->DoLabel_AutoLineSize(pTitle, HeadlineFontSize, TEXTALIGN_ML, &View, HeadlineHeight);
+			View.HSplitTop(MarginSmall, nullptr, &View);
+
+			DoButton_CheckBoxAutoVMarginAndSet(pEnable, Localize("Enable"), pEnable, &View, LineSize);
+
+			View.HSplitTop(LineSize, &Row, &View);
+			Ui()->DoScrollbarOption(pSpeed, pSpeed, &Row, Localize("Speed"), 1, 100);
+
+			View.HSplitTop(LineSize, &Row, &View);
+			Row.VSplitMid(&ModeConstant, &ModeLinear);
+			if(DoButton_CheckBox(&s_aModeButtons[Index][0], Localize("Constant"), *pMode == 0, &ModeConstant))
+				*pMode = 0;
+			if(DoButton_CheckBox(&s_aModeButtons[Index][1], Localize("Linear"), *pMode == 1, &ModeLinear))
+				*pMode = 1;
+
+			DoButton_CheckBoxAutoVMarginAndSet(pWave, Localize("Wave over the whole name"), pWave, &View, LineSize);
+
+			DoLine_ColorPicker(&s_aColorButtons[Index][0], ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &View, Localize("Color 1"), pColor1, Default1, false);
+			DoLine_ColorPicker(&s_aColorButtons[Index][1], ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &View, Localize("Color 2"), pColor2, Default2, false);
+			DoLine_ColorPicker(&s_aColorButtons[Index][2], ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &View, Localize("Color 3"), pColor3, Default3, false);
+		};
+
+		CUIRect OwnView, FriendView, OtherView, Rest;
+		const float ColumnGap = 15.0f;
+		const float ColumnWidth = (MainView.w - 2.0f * ColumnGap) / 3.0f;
+		MainView.VSplitLeft(ColumnWidth, &OwnView, &Rest);
+		Rest.VSplitLeft(ColumnGap, nullptr, &Rest);
+		Rest.VSplitLeft(ColumnWidth, &FriendView, &Rest);
+		Rest.VSplitLeft(ColumnGap, nullptr, &OtherView);
+
+		DoGroup(0, OwnView, Localize("Me (main, dummy, extra)"),
+			&g_Config.m_ClNameGradientOwn, &g_Config.m_ClNameGradientOwnSpeed, &g_Config.m_ClNameGradientOwnMode, &g_Config.m_ClNameGradientOwnWave,
+			&g_Config.m_ClNameGradientOwnColor1, &g_Config.m_ClNameGradientOwnColor2, &g_Config.m_ClNameGradientOwnColor3,
+			ColorRGBA(1.0f, 0.0f, 0.0f), ColorRGBA(0.0f, 1.0f, 0.0f), ColorRGBA(0.0f, 0.0f, 1.0f));
+		DoGroup(1, FriendView, Localize("Friends"),
+			&g_Config.m_ClNameGradientFriend, &g_Config.m_ClNameGradientFriendSpeed, &g_Config.m_ClNameGradientFriendMode, &g_Config.m_ClNameGradientFriendWave,
+			&g_Config.m_ClNameGradientFriendColor1, &g_Config.m_ClNameGradientFriendColor2, &g_Config.m_ClNameGradientFriendColor3,
+			ColorRGBA(1.0f, 0.4f, 0.7f), ColorRGBA(1.0f, 0.6f, 0.2f), ColorRGBA(1.0f, 0.9f, 0.2f));
+		DoGroup(2, OtherView, Localize("Others"),
+			&g_Config.m_ClNameGradientOther, &g_Config.m_ClNameGradientOtherSpeed, &g_Config.m_ClNameGradientOtherMode, &g_Config.m_ClNameGradientOtherWave,
+			&g_Config.m_ClNameGradientOtherColor1, &g_Config.m_ClNameGradientOtherColor2, &g_Config.m_ClNameGradientOtherColor3,
+			ColorRGBA(0.0f, 1.0f, 1.0f), ColorRGBA(0.8f, 0.0f, 1.0f), ColorRGBA(0.0f, 0.0f, 1.0f));
+
+		return;
+	}
+	// ***** Trail tab ***** //
+	if(s_CurTab == TESTCLIENT_TAB_TRAIL)
+	{
+		const float LineSize = 20.0f;
+		const float ColorPickerLineSize = 25.0f;
+		const float ColorPickerLabelSize = 13.0f;
+		const float ColorPickerLineSpacing = 5.0f;
+		const float HeadlineFontSize = 20.0f;
+		const float HeadlineHeight = 30.0f;
+		const float MarginSmall = 5.0f;
+
+		static CButtonContainer s_aTrailEnableCheckbox[3];
+		static CButtonContainer s_aTrailModeSolid[3];
+		static CButtonContainer s_aTrailModeRandom[3];
+		static CButtonContainer s_aTrailColorPicker[3];
+
+		CUIRect Left, Right, Button, Row;
+
+		MainView.VSplitMid(&Left, &Right, 20.0f);
+
+		// ---- Global settings (left) ----
+		Ui()->DoLabel_AutoLineSize(Localize("Trail"), HeadlineFontSize, TEXTALIGN_ML, &Left, HeadlineHeight);
+		Left.HSplitTop(MarginSmall, nullptr, &Left);
+
+		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_ClTrail, Localize("Enable trails"), &g_Config.m_ClTrail, &Left, LineSize);
+
+		Left.HSplitTop(LineSize, &Button, &Left);
+		Ui()->DoScrollbarOption(&g_Config.m_ClTrailSize, &g_Config.m_ClTrailSize, &Button, Localize("Segment size"), 1, 50);
+
+		Left.HSplitTop(LineSize, &Button, &Left);
+		Ui()->DoScrollbarOption(&g_Config.m_ClTrailLifetime, &g_Config.m_ClTrailLifetime, &Button, Localize("Lifetime (ms)"), 100, 5000);
+
+		Left.HSplitTop(LineSize, &Button, &Left);
+		Ui()->DoScrollbarOption(&g_Config.m_ClTrailFadeTime, &g_Config.m_ClTrailFadeTime, &Button, Localize("Fade time (ms)"), 0, 5000);
+
+		Left.HSplitTop(LineSize, &Button, &Left);
+		Ui()->DoScrollbarOption(&g_Config.m_ClTrailSpacing, &g_Config.m_ClTrailSpacing, &Button, Localize("Spacing"), 1, 100);
+
+		// ---- Per-group colors (right) ----
+		Ui()->DoLabel_AutoLineSize(Localize("Colors per group"), HeadlineFontSize, TEXTALIGN_ML, &Right, HeadlineHeight);
+		Right.HSplitTop(MarginSmall, nullptr, &Right);
+
+		struct SGroup
+		{
+			const char *m_pTitle;
+			int *m_pEnable;
+			int *m_pColorMode;
+			unsigned int *m_pColor;
+		};
+		const SGroup aGroups[3] = {
+			{Localize("Own"), &g_Config.m_ClTrailOwn, &g_Config.m_ClTrailOwnColorMode, &g_Config.m_ClTrailOwnColor},
+			{Localize("Friends"), &g_Config.m_ClTrailFriend, &g_Config.m_ClTrailFriendColorMode, &g_Config.m_ClTrailFriendColor},
+			{Localize("Others"), &g_Config.m_ClTrailOther, &g_Config.m_ClTrailOtherColorMode, &g_Config.m_ClTrailOtherColor},
+		};
+
+		for(int Group = 0; Group < 3; ++Group)
+		{
+			Right.HSplitTop(MarginSmall, nullptr, &Right);
+			DoButton_CheckBoxAutoVMarginAndSet(&s_aTrailEnableCheckbox[Group], aGroups[Group].m_pTitle, aGroups[Group].m_pEnable, &Right, LineSize);
+
+			if(!*aGroups[Group].m_pEnable)
+				continue;
+
+			Right.HSplitTop(LineSize, &Row, &Right);
+			CUIRect ModeSolid, ModeRandom;
+			Row.VSplitMid(&ModeSolid, &ModeRandom);
+			if(DoButton_CheckBox(&s_aTrailModeSolid[Group], Localize("Solid"), *aGroups[Group].m_pColorMode == 0, &ModeSolid))
+				*aGroups[Group].m_pColorMode = 0;
+			if(DoButton_CheckBox(&s_aTrailModeRandom[Group], Localize("Random"), *aGroups[Group].m_pColorMode == 1, &ModeRandom))
+				*aGroups[Group].m_pColorMode = 1;
+
+			if(*aGroups[Group].m_pColorMode == 0)
+			{
+				DoLine_ColorPicker(&s_aTrailColorPicker[Group], ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &Right,
+					Localize("Color"), aGroups[Group].m_pColor, ColorRGBA(1.0f, 1.0f, 1.0f), false);
+			}
+			else
+			{
+				Right.HSplitTop(ColorPickerLineSize, nullptr, &Right);
+			}
+		}
+
+		return;
+	}
 
 	// Создаем область прокрутки для всей страницы
 	static CScrollRegion s_ScrollRegion;
@@ -457,13 +633,29 @@ void CMenus::RenderSettingsTestClient(CUIRect MainView)
 		Ui()->DoScrollbarOption(&g_Config.m_ClTestClientEmoteDelay, &g_Config.m_ClTestClientEmoteDelay, &Button, Localize("Delay between emotes"), 5, 10000, &CUi::ms_LinearScrollbarScale, 0u, " ms");
 	}
 
-	// Copy moves toggle
+	// Copy moves toggle (имеет смысл только при >= 2 соединениях)
+	const bool CopyMovesHasTargets =
+		Client()->DummyConnected() ||
+		Client()->IsExtraConnOnline(IClient::CONN_EXTRA1) ||
+		Client()->IsExtraConnOnline(IClient::CONN_EXTRA2);
+
 	MainView.HSplitTop(12.0f, nullptr, &MainView);
 	MainView.HSplitTop(20.0f, &Button, &MainView);
 	s_ScrollRegion.AddRect(Button);
 	static CButtonContainer s_CopyAllCheckbox;
-	if(DoButton_CheckBox(&s_CopyAllCheckbox, Localize("All connections copy moves"), g_Config.m_ClDummyCopyMoves, &Button))
-		g_Config.m_ClDummyCopyMoves ^= 1;
+	if(!CopyMovesHasTargets)
+	{
+		// Рисуем «заблокированный» чекбокс: значение 0, клик не срабатывает.
+		DoButton_CheckBox(&s_CopyAllCheckbox, Localize("All connections copy moves"), false, &Button);
+		TextRender()->TextColor(0.6f, 0.6f, 0.6f, 1.0f);
+		Ui()->DoToolTip(&s_CopyAllCheckbox, &Button, Localize("Connect dummy or extra first"));
+		TextRender()->TextColor(TextRender()->DefaultTextColor());
+	}
+	else
+	{
+		if(DoButton_CheckBox(&s_CopyAllCheckbox, Localize("All connections copy moves"), g_Config.m_ClDummyCopyMoves, &Button))
+			g_Config.m_ClDummyCopyMoves ^= 1;
+	}
 
 	MainView.HSplitTop(4.0f, nullptr, &MainView);
 	MainView.HSplitTop(16.0f, &Label, &MainView);

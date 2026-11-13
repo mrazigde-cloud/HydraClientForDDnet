@@ -72,6 +72,30 @@ void CControls::OnPlayerDeath()
 	std::fill(std::begin(m_aAmmoCount), std::end(m_aAmmoCount), 0);
 }
 
+void CControls::ForceReleaseFire(int Slot)
+{
+	if(Slot < 0 || Slot >= NUM_CONNS)
+		return;
+	// m_Fire — счётчик: нечётное = зажато, чётное = отпущено.
+	// Принудительно переводим в чётное и синхронизируем m_aLastData,
+	// чтобы SnapInput не отправил «зажатое» состояние при следующем изменении
+	// других полей (мышь, чат, и т.д.).
+	if(m_aInputData[Slot].m_Fire & 1)
+		m_aInputData[Slot].m_Fire = (m_aInputData[Slot].m_Fire + 1) & 63;
+	m_aLastData[Slot].m_Fire = m_aInputData[Slot].m_Fire;
+}
+
+void CControls::SetSlotFireReleased(int Slot, int Fire)
+{
+	if(Slot < 0 || Slot >= NUM_CONNS)
+		return;
+	Fire &= INPUT_STATE_MASK;
+	if(Fire & 1)
+		Fire = (Fire + 1) & INPUT_STATE_MASK;
+	m_aInputData[Slot].m_Fire = Fire;
+	m_aLastData[Slot].m_Fire = Fire;
+}
+
 struct CInputState
 {
 	CControls *m_pControls;
@@ -249,91 +273,110 @@ void CControls::OnMessage(int Msg, void *pRawMsg)
 	}
 }
 
-int CControls::SnapInput(int *pData)
+int CControls::SnapInput(int *pData, int Slot)
 {
+	if(Slot < 0)
+		Slot = ActiveSlot();
+
 	if(m_ForceSnapInput)
 	{
 		m_ForceSnapInput = false;
-		m_aInputData[ActiveSlot()].m_TargetX = (int)m_aMousePos[ActiveSlot()].x;
-		m_aInputData[ActiveSlot()].m_TargetY = (int)m_aMousePos[ActiveSlot()].y;
-		mem_copy(pData, &m_aInputData[ActiveSlot()], sizeof(CNetObj_PlayerInput));
+		m_aInputData[Slot].m_TargetX = (int)m_aMousePos[Slot].x;
+		m_aInputData[Slot].m_TargetY = (int)m_aMousePos[Slot].y;
+		mem_copy(pData, &m_aInputData[Slot], sizeof(CNetObj_PlayerInput));
 		return sizeof(CNetObj_PlayerInput);
 	}
 
 	// update player state
 	if(GameClient()->m_Chat.IsActive())
-		m_aInputData[ActiveSlot()].m_PlayerFlags = PLAYERFLAG_CHATTING;
+		m_aInputData[Slot].m_PlayerFlags = PLAYERFLAG_CHATTING;
 	else if(GameClient()->m_Menus.IsActive())
-		m_aInputData[ActiveSlot()].m_PlayerFlags = PLAYERFLAG_IN_MENU;
+		m_aInputData[Slot].m_PlayerFlags = PLAYERFLAG_IN_MENU;
 	else
-		m_aInputData[ActiveSlot()].m_PlayerFlags = PLAYERFLAG_PLAYING;
+		m_aInputData[Slot].m_PlayerFlags = PLAYERFLAG_PLAYING;
 
 	if(GameClient()->m_Scoreboard.IsActive())
-		m_aInputData[ActiveSlot()].m_PlayerFlags |= PLAYERFLAG_SCOREBOARD;
+		m_aInputData[Slot].m_PlayerFlags |= PLAYERFLAG_SCOREBOARD;
 
-	if(Client()->ServerCapAnyPlayerFlag() && GameClient()->m_Controls.m_aShowHookColl[ActiveSlot()])
-		m_aInputData[ActiveSlot()].m_PlayerFlags |= PLAYERFLAG_AIM;
+	if(Client()->ServerCapAnyPlayerFlag() && GameClient()->m_Controls.m_aShowHookColl[Slot])
+		m_aInputData[Slot].m_PlayerFlags |= PLAYERFLAG_AIM;
 
 	if(Client()->ServerCapAnyPlayerFlag() && GameClient()->m_Camera.CamType() == CCamera::CAMTYPE_SPEC)
-		m_aInputData[ActiveSlot()].m_PlayerFlags |= PLAYERFLAG_SPEC_CAM;
+		m_aInputData[Slot].m_PlayerFlags |= PLAYERFLAG_SPEC_CAM;
 
-	switch(m_aMouseInputType[ActiveSlot()])
+	switch(m_aMouseInputType[Slot])
 	{
 	case CControls::EMouseInputType::AUTOMATED:
-		m_aInputData[ActiveSlot()].m_PlayerFlags |= PLAYERFLAG_INPUT_ABSOLUTE;
+		m_aInputData[Slot].m_PlayerFlags |= PLAYERFLAG_INPUT_ABSOLUTE;
 		break;
 	case CControls::EMouseInputType::ABSOLUTE:
-		m_aInputData[ActiveSlot()].m_PlayerFlags |= PLAYERFLAG_INPUT_ABSOLUTE | PLAYERFLAG_INPUT_MANUAL;
+		m_aInputData[Slot].m_PlayerFlags |= PLAYERFLAG_INPUT_ABSOLUTE | PLAYERFLAG_INPUT_MANUAL;
 		break;
 	case CControls::EMouseInputType::RELATIVE:
-		m_aInputData[ActiveSlot()].m_PlayerFlags |= PLAYERFLAG_INPUT_MANUAL;
+		m_aInputData[Slot].m_PlayerFlags |= PLAYERFLAG_INPUT_MANUAL;
 		break;
 	}
 
-	bool Send = m_aLastData[ActiveSlot()].m_PlayerFlags != m_aInputData[ActiveSlot()].m_PlayerFlags;
+	bool Send = m_aLastData[Slot].m_PlayerFlags != m_aInputData[Slot].m_PlayerFlags;
 
-	m_aLastData[ActiveSlot()].m_PlayerFlags = m_aInputData[ActiveSlot()].m_PlayerFlags;
+	m_aLastData[Slot].m_PlayerFlags = m_aInputData[Slot].m_PlayerFlags;
 
 	// we freeze the input if chat or menu is activated
-	if(!(m_aInputData[ActiveSlot()].m_PlayerFlags & PLAYERFLAG_PLAYING))
+	if(!(m_aInputData[Slot].m_PlayerFlags & PLAYERFLAG_PLAYING))
 	{
-		if(!GameClient()->m_GameInfo.m_BugDDRaceInput)
-			ResetInput(ActiveSlot());
+		if(Slot == ActiveSlot())
+		{
+			if(!GameClient()->m_GameInfo.m_BugDDRaceInput)
+			{
+				// DDNet: полный сброс (direction/jump/fire/hook).
+				ResetInput(Slot);
+			}
+			else
+			{
+				// DDRace: BugDDRaceInput сохраняет direction/hook/jump,
+				// чтобы персонаж не останавливался в меню. Но fire нужно
+				// отпустить — иначе зажатый fire при открытии меню
+				// отправляется на сервер как «press», и персонаж стреляет.
+				// SetSlotFireReleased переводит fire в чётное (release),
+				// синхронизируя m_aInputData и m_aLastData.
+				SetSlotFireReleased(Slot, m_aLastData[Slot].m_Fire);
+			}
+		}
 
-		mem_copy(pData, &m_aInputData[ActiveSlot()], sizeof(m_aInputData[0]));
+		mem_copy(pData, &m_aInputData[Slot], sizeof(m_aInputData[0]));
 
 		// set the target anyway though so that we can keep seeing our surroundings,
 		// even if chat or menu are activated
-		m_aInputData[ActiveSlot()].m_TargetX = (int)m_aMousePos[ActiveSlot()].x;
-		m_aInputData[ActiveSlot()].m_TargetY = (int)m_aMousePos[ActiveSlot()].y;
+		m_aInputData[Slot].m_TargetX = (int)m_aMousePos[Slot].x;
+		m_aInputData[Slot].m_TargetY = (int)m_aMousePos[Slot].y;
 
 		// send once a second just to be sure
 		Send = Send || time_get() > m_LastSendTime + time_freq();
 	}
 	else
 	{
-		m_aInputData[ActiveSlot()].m_TargetX = (int)m_aMousePos[ActiveSlot()].x;
-		m_aInputData[ActiveSlot()].m_TargetY = (int)m_aMousePos[ActiveSlot()].y;
+		m_aInputData[Slot].m_TargetX = (int)m_aMousePos[Slot].x;
+		m_aInputData[Slot].m_TargetY = (int)m_aMousePos[Slot].y;
 
-		if(g_Config.m_ClSubTickAiming && m_aMousePosOnAction[ActiveSlot()] != vec2(0.0f, 0.0f))
+		if(g_Config.m_ClSubTickAiming && m_aMousePosOnAction[Slot] != vec2(0.0f, 0.0f))
 		{
-			m_aInputData[ActiveSlot()].m_TargetX = (int)m_aMousePosOnAction[ActiveSlot()].x;
-			m_aInputData[ActiveSlot()].m_TargetY = (int)m_aMousePosOnAction[ActiveSlot()].y;
-			m_aMousePosOnAction[ActiveSlot()] = vec2(0.0f, 0.0f);
+			m_aInputData[Slot].m_TargetX = (int)m_aMousePosOnAction[Slot].x;
+			m_aInputData[Slot].m_TargetY = (int)m_aMousePosOnAction[Slot].y;
+			m_aMousePosOnAction[Slot] = vec2(0.0f, 0.0f);
 		}
 
-		if(!m_aInputData[ActiveSlot()].m_TargetX && !m_aInputData[ActiveSlot()].m_TargetY)
+		if(!m_aInputData[Slot].m_TargetX && !m_aInputData[Slot].m_TargetY)
 		{
-			m_aInputData[ActiveSlot()].m_TargetX = 1;
-			m_aMousePos[ActiveSlot()].x = 1;
+			m_aInputData[Slot].m_TargetX = 1;
+			m_aMousePos[Slot].x = 1;
 		}
 
 		// set direction
-		m_aInputData[ActiveSlot()].m_Direction = 0;
-		if(m_aInputDirectionLeft[ActiveSlot()] && !m_aInputDirectionRight[ActiveSlot()])
-			m_aInputData[ActiveSlot()].m_Direction = -1;
-		if(!m_aInputDirectionLeft[ActiveSlot()] && m_aInputDirectionRight[ActiveSlot()])
-			m_aInputData[ActiveSlot()].m_Direction = 1;
+		m_aInputData[Slot].m_Direction = 0;
+		if(m_aInputDirectionLeft[Slot] && !m_aInputDirectionRight[Slot])
+			m_aInputData[Slot].m_Direction = -1;
+		if(!m_aInputDirectionLeft[Slot] && m_aInputDirectionRight[Slot])
+			m_aInputData[Slot].m_Direction = 1;
 
 		// dummy copy moves
 		if(g_Config.m_ClDummyCopyMoves)
@@ -343,19 +386,19 @@ int CControls::SnapInput(int *pData)
 			// Don't copy any input to dummy when spectating others
 			if(!GameClient()->m_Snap.m_SpecInfo.m_Active || GameClient()->m_Snap.m_SpecInfo.m_SpectatorId < 0)
 			{
-				pDummyInput->m_Direction = m_aInputData[ActiveSlot()].m_Direction;
-				pDummyInput->m_Hook = m_aInputData[ActiveSlot()].m_Hook;
-				pDummyInput->m_Jump = m_aInputData[ActiveSlot()].m_Jump;
-				pDummyInput->m_PlayerFlags = m_aInputData[ActiveSlot()].m_PlayerFlags;
-				pDummyInput->m_TargetX = m_aInputData[ActiveSlot()].m_TargetX;
-				pDummyInput->m_TargetY = m_aInputData[ActiveSlot()].m_TargetY;
-				pDummyInput->m_WantedWeapon = m_aInputData[ActiveSlot()].m_WantedWeapon;
+				pDummyInput->m_Direction = m_aInputData[Slot].m_Direction;
+				pDummyInput->m_Hook = m_aInputData[Slot].m_Hook;
+				pDummyInput->m_Jump = m_aInputData[Slot].m_Jump;
+				pDummyInput->m_PlayerFlags = m_aInputData[Slot].m_PlayerFlags;
+				pDummyInput->m_TargetX = m_aInputData[Slot].m_TargetX;
+				pDummyInput->m_TargetY = m_aInputData[Slot].m_TargetY;
+				pDummyInput->m_WantedWeapon = m_aInputData[Slot].m_WantedWeapon;
 
 				if(!g_Config.m_ClDummyControl)
-					pDummyInput->m_Fire += m_aInputData[ActiveSlot()].m_Fire - m_aLastData[ActiveSlot()].m_Fire;
+					pDummyInput->m_Fire += m_aInputData[Slot].m_Fire - m_aLastData[Slot].m_Fire;
 
-				pDummyInput->m_NextWeapon += m_aInputData[ActiveSlot()].m_NextWeapon - m_aLastData[ActiveSlot()].m_NextWeapon;
-				pDummyInput->m_PrevWeapon += m_aInputData[ActiveSlot()].m_PrevWeapon - m_aLastData[ActiveSlot()].m_PrevWeapon;
+				pDummyInput->m_NextWeapon += m_aInputData[Slot].m_NextWeapon - m_aLastData[Slot].m_NextWeapon;
+				pDummyInput->m_PrevWeapon += m_aInputData[Slot].m_PrevWeapon - m_aLastData[Slot].m_PrevWeapon;
 			}
 
 			m_aInputData[!g_Config.m_ClDummy] = *pDummyInput;
@@ -379,36 +422,36 @@ int CControls::SnapInput(int *pData)
 		if(g_Config.m_DbgStress)
 		{
 			float t = Client()->LocalTime();
-			mem_zero(&m_aInputData[ActiveSlot()], sizeof(m_aInputData[0]));
+			mem_zero(&m_aInputData[Slot], sizeof(m_aInputData[0]));
 
-			m_aInputData[ActiveSlot()].m_Direction = ((int)t / 2) & 1;
-			m_aInputData[ActiveSlot()].m_Jump = ((int)t);
-			m_aInputData[ActiveSlot()].m_Fire = ((int)(t * 10));
-			m_aInputData[ActiveSlot()].m_Hook = ((int)(t * 2)) & 1;
-			m_aInputData[ActiveSlot()].m_WantedWeapon = ((int)t) % NUM_WEAPONS;
-			m_aInputData[ActiveSlot()].m_TargetX = (int)(std::sin(t * 3) * 100.0f);
-			m_aInputData[ActiveSlot()].m_TargetY = (int)(std::cos(t * 3) * 100.0f);
+			m_aInputData[Slot].m_Direction = ((int)t / 2) & 1;
+			m_aInputData[Slot].m_Jump = ((int)t);
+			m_aInputData[Slot].m_Fire = ((int)(t * 10));
+			m_aInputData[Slot].m_Hook = ((int)(t * 2)) & 1;
+			m_aInputData[Slot].m_WantedWeapon = ((int)t) % NUM_WEAPONS;
+			m_aInputData[Slot].m_TargetX = (int)(std::sin(t * 3) * 100.0f);
+			m_aInputData[Slot].m_TargetY = (int)(std::cos(t * 3) * 100.0f);
 		}
 
 		// check if we need to send input
-		Send = Send || m_aInputData[ActiveSlot()].m_Direction != m_aLastData[ActiveSlot()].m_Direction;
-		Send = Send || m_aInputData[ActiveSlot()].m_Jump != m_aLastData[ActiveSlot()].m_Jump;
-		Send = Send || m_aInputData[ActiveSlot()].m_Fire != m_aLastData[ActiveSlot()].m_Fire;
-		Send = Send || m_aInputData[ActiveSlot()].m_Hook != m_aLastData[ActiveSlot()].m_Hook;
-		Send = Send || m_aInputData[ActiveSlot()].m_WantedWeapon != m_aLastData[ActiveSlot()].m_WantedWeapon;
-		Send = Send || m_aInputData[ActiveSlot()].m_NextWeapon != m_aLastData[ActiveSlot()].m_NextWeapon;
-		Send = Send || m_aInputData[ActiveSlot()].m_PrevWeapon != m_aLastData[ActiveSlot()].m_PrevWeapon;
+		Send = Send || m_aInputData[Slot].m_Direction != m_aLastData[Slot].m_Direction;
+		Send = Send || m_aInputData[Slot].m_Jump != m_aLastData[Slot].m_Jump;
+		Send = Send || m_aInputData[Slot].m_Fire != m_aLastData[Slot].m_Fire;
+		Send = Send || m_aInputData[Slot].m_Hook != m_aLastData[Slot].m_Hook;
+		Send = Send || m_aInputData[Slot].m_WantedWeapon != m_aLastData[Slot].m_WantedWeapon;
+		Send = Send || m_aInputData[Slot].m_NextWeapon != m_aLastData[Slot].m_NextWeapon;
+		Send = Send || m_aInputData[Slot].m_PrevWeapon != m_aLastData[Slot].m_PrevWeapon;
 		Send = Send || time_get() > m_LastSendTime + time_freq() / 25; // send at least 25 Hz
-		Send = Send || (GameClient()->m_Snap.m_pLocalCharacter && GameClient()->m_Snap.m_pLocalCharacter->m_Weapon == WEAPON_NINJA && (m_aInputData[ActiveSlot()].m_Direction || m_aInputData[ActiveSlot()].m_Jump || m_aInputData[ActiveSlot()].m_Hook));
+		Send = Send || (GameClient()->m_Snap.m_pLocalCharacter && GameClient()->m_Snap.m_pLocalCharacter->m_Weapon == WEAPON_NINJA && (m_aInputData[Slot].m_Direction || m_aInputData[Slot].m_Jump || m_aInputData[Slot].m_Hook));
 	}
 
 	// copy and return size
-	m_aLastData[ActiveSlot()] = m_aInputData[ActiveSlot()];
+	m_aLastData[Slot] = m_aInputData[Slot];
 	if(!Send)
 		return 0;
 
 	m_LastSendTime = time_get();
-	mem_copy(pData, &m_aInputData[ActiveSlot()], sizeof(m_aInputData[0]));
+	mem_copy(pData, &m_aInputData[Slot], sizeof(m_aInputData[0]));
 	return sizeof(m_aInputData[0]);
 }
 

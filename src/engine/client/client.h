@@ -328,6 +328,8 @@ public:
 	void SendEnterGame(int Conn);
 	void SendReady(int Conn);
 	void SendMapRequest();
+	void ReleaseAllFire();
+	bool m_LastCopyAll = false;
 
 	bool RconAuthed() const override { return m_aRconAuthed[g_Config.m_ClDummy] != 0; }
 	bool UseTempRconCommands() const override { return m_UseTempRconCommands != 0; }

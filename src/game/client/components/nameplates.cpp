@@ -10,6 +10,7 @@
 
 #include <game/client/animstate.h>
 #include <game/client/gameclient.h>
+#include <game/client/gradient_name.h>
 #include <game/client/prediction/entities/character.h>
 
 #include <memory>
@@ -25,9 +26,11 @@ enum class EHookStrongWeakState
 class CNamePlateData
 {
 public:
+   	int m_NameGradientGroup = 0;
 	bool m_InGame;
 	ColorRGBA m_Color;
 	bool m_ShowName;
+	bool m_UseNameGradient = false;
 	char m_aName[std::max((size_t)MAX_NAME_LENGTH, (size_t)protocol7::MAX_NAME_ARRAY_SIZE)];
 	bool m_ShowFriendMark;
 	bool m_ShowClientId;
@@ -341,10 +344,14 @@ class CNamePlatePartName : public CNamePlatePartText
 private:
 	char m_aText[std::max((size_t)MAX_NAME_LENGTH, (size_t)protocol7::MAX_NAME_ARRAY_SIZE)] = "";
 	float m_FontSize = -INFINITY;
+	CGradientText m_Gradient;
+	bool m_UseGradient = false;
+   	int m_GradientGroup = 0;
 
 protected:
 	bool UpdateNeeded(CGameClient &This, const CNamePlateData &Data) override
 	{
+   		m_GradientGroup = Data.m_NameGradientGroup;
 		m_Visible = Data.m_ShowName;
 		if(!m_Visible)
 			return false;
@@ -363,6 +370,62 @@ protected:
 public:
 	CNamePlatePartName(CGameClient &This) :
 		CNamePlatePartText(This) {}
+
+	void Update(CGameClient &This, const CNamePlateData &Data) override
+	{
+		m_UseGradient = Data.m_ShowName && Data.m_UseNameGradient;
+   		m_GradientGroup = Data.m_NameGradientGroup;
+		if(!m_UseGradient)
+		{
+			m_Gradient.Reset(This.TextRender());
+			CNamePlatePartText::Update(This, Data);
+			return;
+		}
+
+		m_Visible = true;
+		m_Color = Data.m_Color;
+		This.TextRender()->DeleteTextContainer(m_TextContainerIndex);
+		if(m_Gradient.NeedsUpdate(Data.m_aName, Data.m_FontSize))
+		{
+			This.TextRender()->SetRenderFlags(Data.m_InGame ? ETextRenderFlags::TEXT_RENDER_FLAG_NO_PIXEL_ALIGNMENT : 0);
+			if(Data.m_InGame)
+			{
+				CScreenRect ScreenRect = This.Graphics()->GetScreen();
+				This.Graphics()->MapScreenToInterface(This.m_Camera.m_Center.x, This.m_Camera.m_Center.y);
+				m_Gradient.Update(This.TextRender(), Data.m_aName, Data.m_FontSize);
+				This.Graphics()->MapScreen(ScreenRect);
+			}
+			else
+			{
+				m_Gradient.Update(This.TextRender(), Data.m_aName, Data.m_FontSize);
+			}
+			This.TextRender()->SetRenderFlags(0);
+		}
+		if(!m_Gradient.Valid())
+		{
+			m_Visible = false;
+			return;
+		}
+		m_Size = m_Gradient.Size();
+	}
+	void Reset(CGameClient &This) override
+	{
+		m_Gradient.Reset(This.TextRender());
+		CNamePlatePartText::Reset(This);
+	}
+	void Render(CGameClient &This, vec2 Pos) const override
+	{
+		if(!m_UseGradient)
+		{
+			CNamePlatePartText::Render(This, Pos);
+			return;
+		}
+		if(!m_Gradient.Valid())
+			return;
+		m_Gradient.Render(This.TextRender(), vec2(Pos.x - Size().x / 2.0f, Pos.y - Size().y / 2.0f),
+			SNameGradientParams::FromConfig(m_GradientGroup), This.Client()->LocalTime(),
+			m_Color.a, ColorRGBA(0.0f, 0.0f, 0.0f, 0.5f * m_Color.a));
+	}
 };
 
 class CNamePlatePartClan : public CNamePlatePartText
@@ -664,23 +727,36 @@ void CNamePlates::RenderNamePlateGame(vec2 Position, const CNetObj_PlayerInfo *p
 		Alpha *= (float)g_Config.m_ClShowOthersAlpha / 100.0f;
 
 	Data.m_Color = ColorRGBA(1.0f, 1.0f, 1.0f);
+	bool TeamColored = false;
 	if(g_Config.m_ClNamePlatesTeamcolors)
 	{
 		if(GameClient()->IsTeamPlay())
 		{
 			if(ClientData.m_Team == TEAM_RED)
+			{
 				Data.m_Color = ColorRGBA(1.0f, 0.5f, 0.5f);
+				TeamColored = true;
+			}
 			else if(ClientData.m_Team == TEAM_BLUE)
+			{
 				Data.m_Color = ColorRGBA(0.7f, 0.7f, 1.0f);
+				TeamColored = true;
+			}
 		}
 		else
 		{
 			const int Team = GameClient()->m_Teams.Team(pPlayerInfo->m_ClientId);
 			if(Team)
+			{
 				Data.m_Color = GameClient()->GetDDTeamColor(Team, 0.75f);
+				TeamColored = true;
+			}
 		}
 	}
 	Data.m_Color.a = Alpha;
+   	const int GradientGroup = TeamColored ? NAME_GRADIENT_NONE : NameGradientGroup(*GameClient(), pPlayerInfo->m_ClientId);
+   	Data.m_UseNameGradient = GradientGroup != NAME_GRADIENT_NONE;
+   	Data.m_NameGradientGroup = std::max(GradientGroup, 0);
 
 	int ShowDirectionConfig = g_Config.m_ClShowDirection;
 #if defined(CONF_VIDEORECORDER)
@@ -777,7 +853,8 @@ void CNamePlates::RenderNamePlatePreview(vec2 Position, int Dummy)
 	CNamePlateData Data;
 
 	Data.m_InGame = false;
-	Data.m_Color = g_Config.m_ClNamePlatesTeamcolors ? GameClient()->GetDDTeamColor(13, 0.75f) : TextRender()->DefaultTextColor();
+   	Data.m_UseNameGradient = g_Config.m_ClNameGradientOwn != 0;
+	Data.m_Color = (g_Config.m_ClNamePlatesTeamcolors && !Data.m_UseNameGradient) ? GameClient()->GetDDTeamColor(13, 0.75f) : TextRender()->DefaultTextColor();
 	Data.m_Color.a = 1.0f;
 
 	Data.m_ShowName = g_Config.m_ClNamePlates || g_Config.m_ClNamePlatesOwn;

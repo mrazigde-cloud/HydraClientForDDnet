@@ -14,6 +14,7 @@
 #include <game/client/components/statboard.h>
 #include <game/client/gameclient.h>
 #include <game/localization.h>
+#include <game/client/gradient_name.h>
 
 CStatboard::CStatboard()
 {
@@ -305,7 +306,11 @@ void CStatboard::RenderGlobalStats()
 		Cursor.m_FontSize = FontSize;
 		Cursor.m_Flags |= TEXTFLAG_STOP_AT_END;
 		Cursor.m_LineWidth = 220;
-		TextRender()->TextEx(&Cursor, GameClient()->m_aClients[pInfo->m_ClientId].m_aName, -1);
+		if(NameGradientAppliesTo(*GameClient(), pInfo->m_ClientId))
+			RenderGradientTextEx(TextRender(), &Cursor, GameClient()->m_aClients[pInfo->m_ClientId].m_aName,
+				SNameGradientParams::FromConfig(NameGradientGroup(*GameClient(), pInfo->m_ClientId)), Client()->LocalTime());
+		else
+			TextRender()->TextEx(&Cursor, GameClient()->m_aClients[pInfo->m_ClientId].m_aName, -1);
 
 		px = 325;
 

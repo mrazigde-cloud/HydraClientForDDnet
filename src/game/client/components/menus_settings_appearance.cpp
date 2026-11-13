@@ -175,7 +175,7 @@ void CMenus::RenderSettingsAppearance(CUIRect MainView)
 		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_ClShowChatTeamMembersOnly, Localize("Show only chat messages from team members"), &g_Config.m_ClShowChatTeamMembersOnly, &LeftView, LineSize);
 
 		if(DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_ClChatOld, Localize("Use old chat style"), &g_Config.m_ClChatOld, &LeftView, LineSize))
-			GameClient()->m_Chat.RebuildChat();
+			Chat.RebuildChat();
 
 		// DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_ClCensorChat, Localize("Censor profanity"), &g_Config.m_ClCensorChat, &LeftView, LineSize);
 
@@ -597,6 +597,38 @@ void CMenus::RenderSettingsAppearance(CUIRect MainView)
 		RightView.HSplitBottom(LineSize, &RightView, &Button);
 		if(DoButton_CheckBox(&m_DummyNamePlatePreview, g_Config.m_ClDummy ? Localize("Preview player's name plate") : Localize("Preview dummy's name plate"), m_DummyNamePlatePreview, &Button))
 			m_DummyNamePlatePreview = !m_DummyNamePlatePreview;
+
+		// ***** Name gradient settings (below the preview) ***** //
+		{
+			CUIRect GradientView;
+			const float GradientHeight = g_Config.m_ClNameGradient ? (5.0f * LineSize + 3.0f * (ColorPickerLineSize + ColorPickerLineSpacing)) : LineSize;
+			RightView.HSplitBottom(GradientHeight, &RightView, &GradientView);
+
+			DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_ClNameGradient, Localize("Animated name gradient"), &g_Config.m_ClNameGradient, &GradientView, LineSize);
+			if(g_Config.m_ClNameGradient)
+			{
+				DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_ClNameGradientOthers, Localize("Also apply to other players"), &g_Config.m_ClNameGradientOthers, &GradientView, LineSize);
+
+				GradientView.HSplitTop(LineSize, &Button, &GradientView);
+				Ui()->DoScrollbarOption(&g_Config.m_ClNameGradientSpeed, &g_Config.m_ClNameGradientSpeed, &Button, Localize("Gradient speed"), 1, 100);
+
+				static int s_GradientModeConstant, s_GradientModeLinear;
+				CUIRect ModeConstant, ModeLinear;
+				GradientView.HSplitTop(LineSize, &Button, &GradientView);
+				Button.VSplitMid(&ModeConstant, &ModeLinear);
+				if(DoButton_CheckBox(&s_GradientModeConstant, Localize("Constant"), g_Config.m_ClNameGradientMode == 0, &ModeConstant))
+					g_Config.m_ClNameGradientMode = 0;
+				if(DoButton_CheckBox(&s_GradientModeLinear, Localize("Linear"), g_Config.m_ClNameGradientMode == 1, &ModeLinear))
+					g_Config.m_ClNameGradientMode = 1;
+
+				DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_ClNameGradientWave, Localize("Wave over the whole name"), &g_Config.m_ClNameGradientWave, &GradientView, LineSize);
+
+				static CButtonContainer s_GradientColor1, s_GradientColor2, s_GradientColor3;
+				DoLine_ColorPicker(&s_GradientColor1, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &GradientView, Localize("Gradient color 1"), &g_Config.m_ClNameGradientColor1, ColorRGBA(1.0f, 0.0f, 0.0f), false);
+				DoLine_ColorPicker(&s_GradientColor2, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &GradientView, Localize("Gradient color 2"), &g_Config.m_ClNameGradientColor2, ColorRGBA(0.0f, 1.0f, 0.0f), false);
+				DoLine_ColorPicker(&s_GradientColor3, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &GradientView, Localize("Gradient color 3"), &g_Config.m_ClNameGradientColor3, ColorRGBA(0.0f, 0.0f, 1.0f), false);
+			}
+		}
 
 		int Dummy = g_Config.m_ClDummy != (m_DummyNamePlatePreview ? 1 : 0);
 

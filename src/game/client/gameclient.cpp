@@ -202,6 +202,7 @@ void CGameClient::OnConsoleInit()
 					      &m_Particles.m_RenderTrailExtra,
 					      &m_Items,
 					      &m_Ghost,
+					      &m_Trails,
 					      &m_Players,
 					      &m_MapLayersForeground,
 					      &m_Particles.m_RenderExplosions,
@@ -588,15 +589,37 @@ void CGameClient::OnDummySwap()
 	m_DummyInput.m_TargetX = 0;
 	m_DummyInput.m_TargetY = 0;
 	m_DummyInput.m_Fire = 0;
-	m_Controls.m_aInputData[m_Controls.ActiveSlot()].m_Fire = PrevDummyFire & ~2;
+	// Счётчик fire активного слота должен совпадать с тем, что сервер уже видел
+	// от этого соединения. Иначе скачок (например 2->0) даёт серию «нажатий».
+	{
+		const int ActiveConn = g_Config.m_ClDummy ? IClient::CONN_DUMMY : IClient::CONN_MAIN;
+		int LastFire = 0;
+		if(const int *pLastInput = Client()->GetInputForConn(ActiveConn, std::numeric_limits<int>::max()))
+			LastFire = ((const CNetObj_PlayerInput *)pLastInput)->m_Fire;
+		m_Controls.SetSlotFireReleased(m_Controls.ActiveSlot(), LastFire);
+	}
+	(void)PrevDummyFire;
 	m_IsDummySwapping = 1;
 }
+int CGameClient::GetFrozenInput(int *pData, int Slot)
+{
+	if(Slot < 0 || Slot >= NUM_CONNS)
+		return 0;
+	mem_copy(pData, &m_Controls.m_aInputData[Slot], sizeof(CNetObj_PlayerInput));
+	return sizeof(CNetObj_PlayerInput);
+}
 
+void CGameClient::ForceReleaseFire(int Slot)
+{
+	m_Controls.ForceReleaseFire(Slot);
+}
 int CGameClient::OnSnapInput(int *pData, bool Dummy, bool Force)
 {
 	if(!Dummy)
 	{
-		return m_Controls.SnapInput(pData);
+		// Main connection всегда читает базовый слот (0/1) по ClDummy.
+		// Когда активен extra — этот слот заморожен в состоянии на момент переключения.
+		return m_Controls.SnapInput(pData, g_Config.m_ClDummy);
 	}
 	if(m_aLocalIds[!g_Config.m_ClDummy] < 0)
 	{
@@ -1075,11 +1098,31 @@ bool CGameClient::AntiPingGunfire() const
 
 bool CGameClient::Predict() const
 {
-	return g_Config.m_ClPredict &&
-	       !IsWorldPaused() &&
-	       Client()->State() != IClient::STATE_DEMOPLAYBACK &&
-	       !m_Snap.m_SpecInfo.m_Active &&
-	       m_Snap.m_pLocalCharacter;
+	if(!g_Config.m_ClPredict ||
+		IsWorldPaused() ||
+		Client()->State() == IClient::STATE_DEMOPLAYBACK ||
+		m_Snap.m_SpecInfo.m_Active ||
+		!m_Snap.m_pLocalCharacter)
+	{
+		return false;
+	}
+
+	// Не предсказываем, пока локальный тии заморожен.
+	// Используем уже распарсенные CClientData-поля из OnNewSnapshot:
+	//   m_FreezeEnd != 0   — обычный фриз (>0) и deep-frozen (-1)
+	//   m_LiveFrozen       — сервер запретил движение (CHARACTERFLAG_MOVEMENTS_DISABLED)
+	// Проверка через m_Snap.m_ExtendedData.m_FreezeEnd ненадёжна, потому что
+	// m_HasExtendedData может быть false в первый тик после снапшота.
+	if(m_Snap.m_LocalClientId >= 0 && m_Snap.m_LocalClientId < MAX_CLIENTS)
+	{
+		const auto &Client = m_aClients[m_Snap.m_LocalClientId];
+		if(Client.m_FreezeEnd != 0 || Client.m_LiveFrozen)
+		{
+			return false;
+		}
+	}
+
+	return true;
 }
 
 bool CGameClient::PredictDummy() const
@@ -3425,13 +3468,26 @@ void CGameClient::SendDummyInfo(bool Start)
 
 void CGameClient::SendKill() const
 {
-	CNetMsg_Cl_Kill Msg;
-	Client()->SendPackMsgActive(&Msg, MSGFLAG_VITAL);
-
-	if(g_Config.m_ClDummyCopyMoves)
+	const bool CopyAll = g_Config.m_ClDummyCopyMoves != 0;
+	if(CopyAll)
 	{
-		CMsgPacker MsgP(NETMSGTYPE_CL_KILL, false);
-		Client()->SendMsg(!g_Config.m_ClDummy, &MsgP, MSGFLAG_VITAL);
+		// При CopyAll все соединения синхронизированы — убиваем всех разом,
+		// иначе main/dummy/extra остаются живы, пока умирает только активный.
+		CNetMsg_Cl_Kill Msg;
+		Client()->SendPackMsg(IClient::CONN_MAIN, &Msg, MSGFLAG_VITAL);
+		if(Client()->DummyConnected())
+			Client()->SendPackMsg(IClient::CONN_DUMMY, &Msg, MSGFLAG_VITAL);
+		for(int ExtraIdx = 0; ExtraIdx < IClient::NUM_EXTRA_CONNS; ExtraIdx++)
+		{
+			const int Conn = IClient::ExtraIndexToConn(ExtraIdx);
+			if(Client()->IsExtraConnOnline(Conn))
+				Client()->SendPackMsg(Conn, &Msg, MSGFLAG_VITAL);
+		}
+	}
+	else
+	{
+		CNetMsg_Cl_Kill Msg;
+		Client()->SendPackMsgActive(&Msg, MSGFLAG_VITAL);
 	}
 }
 
@@ -4579,15 +4635,20 @@ void CGameClient::ClearPreInputs()
 
 int CGameClient::GetCurrentInput(int *pData)
 {
-	// SnapInput читает клавиатуру/мышь и обновляет m_aInputData.
-	m_Controls.SnapInput(pData);
-	mem_copy(pData, &m_Controls.m_aInputData[m_Controls.ActiveSlot()], sizeof(CNetObj_PlayerInput));
+	return m_Controls.SnapInput(pData, m_Controls.ActiveSlot());
+}
 
-	// CopyAll: dummy рендерит угол из m_DummyInput (см. CPlayers::GetPlayerTargetAngle).
-	// В CopyAll режиме OnSnapInput(Dummy=1) не вызывается, поэтому обновляем вручную —
-	// иначе dummy не поворачивается, пока играешь на main/extra.
-	mem_copy(&m_DummyInput, &m_Controls.m_aInputData[m_Controls.ActiveSlot()], sizeof(CNetObj_PlayerInput));
-
+int CGameClient::GetActiveInput(int *pData)
+{
+	// Всегда возвращает текущий ввод активного слота, даже если SnapInput
+	// не увидел изменений. Нужен для CopyAll, чтобы нельзя было «залипнуть»
+	// на последнем fire=1, когда SnapInput возвращает 0.
+	const int Slot = m_Controls.ActiveSlot();
+	// SnapInput обновляет m_Direction/Target/PlayerFlags в m_aInputData[Slot].
+	// Возвращаемое значение не нужно: шлём полный пакет каждый тик.
+	int aUnused[sizeof(CNetObj_PlayerInput) / sizeof(int)];
+	m_Controls.SnapInput(aUnused, Slot);
+	mem_copy(pData, &m_Controls.m_aInputData[Slot], sizeof(CNetObj_PlayerInput));
 	return sizeof(CNetObj_PlayerInput);
 }
 
@@ -4888,4 +4949,8 @@ void CGameClient::StoreSave(const char *pTeamMembers, const char *pGeneratedCode
 	}
 	CsvWrite(File, std::size(SAVES_HEADER), apColumns);
 	io_close(File);
+}
+void CGameClient::SetSlotFireReleased(int Slot, int Fire)
+{
+	m_Controls.SetSlotFireReleased(Slot, Fire);
 }

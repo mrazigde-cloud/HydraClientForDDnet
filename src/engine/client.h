@@ -42,7 +42,7 @@ class IClient : public IInterface
 {
 	MACRO_INTERFACE("client")
 public:
-	/* Constants: Client States
+	/* Constants: Client States	
 		STATE_OFFLINE - The client is offline.
 		STATE_CONNECTING - The client is trying to connect to a server.
 		STATE_LOADING - The client has connected to a server and is loading resources.
@@ -438,9 +438,11 @@ public:
 	virtual void OnWindowResize() = 0;
 
 	virtual int OnSnapInput(int *pData, bool Dummy, bool Force) = 0;
+	virtual int GetFrozenInput(int *pData, int Slot) = 0;
 	virtual void OnDummySwap() = 0;
 	virtual void SendDummyInfo(bool Start) = 0;
 	virtual void ForceSnapInput() = 0;
+	virtual void SetSlotFireReleased(int Slot, int Fire) = 0;
 
 	virtual int FindExtraClient() const = 0;
 	virtual const char *GetItemName(int Type) const = 0;
@@ -455,6 +457,8 @@ public:
 	virtual void ResetPlayerInput(int PlayerOrDummy) = 0;
 	virtual void ClearPreInputs() = 0;
 	virtual int GetCurrentInput(int *pData) = 0;
+	virtual int GetActiveInput(int *pData) = 0;
+	virtual void ForceReleaseFire(int Slot) = 0;
 	virtual void Echo(const char *pString) = 0;
 
 	virtual bool CanDisplayWarning() const = 0;
