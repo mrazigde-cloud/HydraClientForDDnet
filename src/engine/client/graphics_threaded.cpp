@@ -404,6 +404,8 @@ static CCommandBuffer::SCommand_Texture_Create LoadTextureCreateCommand(int Text
 		Cmd.m_Flags |= TextureFlag::TO_3D_TEXTURE;
 	if((Flags & IGraphics::TEXLOAD_NO_2D_TEXTURE) != 0)
 		Cmd.m_Flags |= TextureFlag::NO_2D_TEXTURE;
+	if((Flags & IGraphics::TEXLOAD_NEAREST_FILTER) != 0)
+		Cmd.m_Flags |= TextureFlag::NEAREST_FILTER; // <-- ДОБАВИТЬ
 
 	return Cmd;
 }

@@ -22,6 +22,7 @@ namespace TextureFlag
 	inline constexpr uint32_t TO_3D_TEXTURE = 1 << 1;
 	inline constexpr uint32_t TO_2D_ARRAY_TEXTURE = 1 << 2;
 	inline constexpr uint32_t NO_2D_TEXTURE = 1 << 3;
+	inline constexpr uint32_t NEAREST_FILTER = 1 << 4; // <--- ДОБАВИТЬ СЮДА
 };
 
 enum class EPrimitiveType

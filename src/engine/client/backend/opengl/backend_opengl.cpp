@@ -800,12 +800,26 @@ void CCommandProcessorFragment_OpenGL::TextureCreate(int Slot, int Width, int He
 		glBindTexture(GL_TEXTURE_2D, m_vTextures[Slot].m_Tex);
 	}
 
+	// Если это пиксельная текстура, принудительно отключаем мипмапы
+	if((Flags & TextureFlag::NEAREST_FILTER) != 0)
+	{
+		Flags |= TextureFlag::NO_MIPMAPS;
+	}
+
 	if(Flags & TextureFlag::NO_MIPMAPS || !m_HasMipMaps)
 	{
 		if((Flags & TextureFlag::NO_2D_TEXTURE) == 0)
 		{
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+			if(Flags & TextureFlag::NEAREST_FILTER)
+			{
+				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+			}
+			else
+			{
+				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+			}
 			glTexImage2D(GL_TEXTURE_2D, 0, GLStoreFormat, Width, Height, 0, GLFormat, GL_UNSIGNED_BYTE, pTexData);
 		}
 	}
@@ -853,18 +867,23 @@ void CCommandProcessorFragment_OpenGL::TextureCreate(int Slot, int Width, int He
 			}
 
 			glTexParameteri(Target, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-			if(Is3DTexture)
+			if(Flags & TextureFlag::NEAREST_FILTER)
 			{
-				glTexParameteri(Target, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-				if(IsNewApi())
-					glSamplerParameteri(m_vTextures[Slot].m_Sampler2DArray, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+				glTexParameteri(Target, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+				glTexParameteri(Target, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 			}
 			else
 			{
-				glTexParameteri(Target, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-				glTexParameteri(Target, GL_GENERATE_MIPMAP, GL_TRUE);
-				if(IsNewApi())
-					glSamplerParameteri(m_vTextures[Slot].m_Sampler2DArray, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+				glTexParameteri(Target, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+				if(Is3DTexture)
+				{
+					glTexParameteri(Target, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+				}
+				else
+				{
+					glTexParameteri(Target, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+					glTexParameteri(Target, GL_GENERATE_MIPMAP, GL_TRUE);
+				}
 			}
 
 			glTexParameteri(Target, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);

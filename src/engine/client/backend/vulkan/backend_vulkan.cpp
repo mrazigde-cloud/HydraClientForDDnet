@@ -821,6 +821,9 @@ class CCommandProcessorFragment_Vulkan : public CCommandProcessorFragment_GLBase
 		SUPPORTED_SAMPLER_TYPE_REPEAT = 0,
 		SUPPORTED_SAMPLER_TYPE_CLAMP_TO_EDGE,
 		SUPPORTED_SAMPLER_TYPE_2D_TEXTURE_ARRAY,
+		SUPPORTED_SAMPLER_TYPE_REPEAT_NEAREST,
+		SUPPORTED_SAMPLER_TYPE_CLAMP_TO_EDGE_NEAREST,
+		SUPPORTED_SAMPLER_TYPE_2D_TEXTURE_ARRAY_NEAREST, // <-- ДОБАВЛЕНО
 
 		SUPPORTED_SAMPLER_TYPE_COUNT,
 	};
@@ -2649,7 +2652,8 @@ protected:
 
 		bool Requires2DTexture = (Flags & TextureFlag::NO_2D_TEXTURE) == 0;
 		bool Requires2DTextureArray = (Flags & TextureFlag::TO_2D_ARRAY_TEXTURE) != 0;
-		bool RequiresMipMaps = (Flags & TextureFlag::NO_MIPMAPS) == 0;
+		bool IsNearest = (Flags & TextureFlag::NEAREST_FILTER) != 0;
+		bool RequiresMipMaps = ((Flags & TextureFlag::NO_MIPMAPS) == 0) && !IsNearest;
 		size_t MipMapLevelCount = 1;
 		if(RequiresMipMaps)
 		{
@@ -2673,10 +2677,21 @@ protected:
 			VkFormat ImgFormat = Format;
 			VkImageView ImgView = CreateTextureImageView(Texture.m_Img, ImgFormat, VK_IMAGE_VIEW_TYPE_2D, 1, MipMapLevelCount);
 			Texture.m_ImgView = ImgView;
-			VkSampler ImgSampler = GetTextureSampler(SUPPORTED_SAMPLER_TYPE_REPEAT);
-			Texture.m_aSamplers[0] = ImgSampler;
-			ImgSampler = GetTextureSampler(SUPPORTED_SAMPLER_TYPE_CLAMP_TO_EDGE);
-			Texture.m_aSamplers[1] = ImgSampler;
+			
+			if(IsNearest)
+			{
+				VkSampler ImgSampler = GetTextureSampler(SUPPORTED_SAMPLER_TYPE_REPEAT_NEAREST);
+				Texture.m_aSamplers[0] = ImgSampler;
+				ImgSampler = GetTextureSampler(SUPPORTED_SAMPLER_TYPE_CLAMP_TO_EDGE_NEAREST);
+				Texture.m_aSamplers[1] = ImgSampler;
+			}
+			else
+			{
+				VkSampler ImgSampler = GetTextureSampler(SUPPORTED_SAMPLER_TYPE_REPEAT);
+				Texture.m_aSamplers[0] = ImgSampler;
+				ImgSampler = GetTextureSampler(SUPPORTED_SAMPLER_TYPE_CLAMP_TO_EDGE);
+				Texture.m_aSamplers[1] = ImgSampler;
+			}
 
 			if(!CreateNewTexturedStandardDescriptorSets(ImageIndex, 0))
 				return false;
@@ -2724,7 +2739,9 @@ protected:
 			VkFormat ImgFormat = Format;
 			VkImageView ImgView = CreateTextureImageView(Texture.m_Img3D, ImgFormat, VK_IMAGE_VIEW_TYPE_2D_ARRAY, ImageDepth2DArray, MipMapLevelCount);
 			Texture.m_Img3DView = ImgView;
-			VkSampler ImgSampler = GetTextureSampler(SUPPORTED_SAMPLER_TYPE_2D_TEXTURE_ARRAY);
+			VkSampler ImgSampler = IsNearest
+				? GetTextureSampler(SUPPORTED_SAMPLER_TYPE_2D_TEXTURE_ARRAY_NEAREST)
+				: GetTextureSampler(SUPPORTED_SAMPLER_TYPE_2D_TEXTURE_ARRAY);
 			Texture.m_Sampler3D = ImgSampler;
 
 			if(!CreateNew3DTexturedStandardDescriptorSets(ImageIndex))
@@ -2856,12 +2873,12 @@ protected:
 		return CreateImageView(TexImage, ImgFormat, ViewType, Depth, MipMapLevelCount);
 	}
 
-	[[nodiscard]] bool CreateTextureSamplersImpl(VkSampler &CreatedSampler, VkSamplerAddressMode AddrModeU, VkSamplerAddressMode AddrModeV, VkSamplerAddressMode AddrModeW)
+	[[nodiscard]] bool CreateTextureSamplersImpl(VkSampler &CreatedSampler, VkSamplerAddressMode AddrModeU, VkSamplerAddressMode AddrModeV, VkSamplerAddressMode AddrModeW, bool Nearest = false)
 	{
 		VkSamplerCreateInfo SamplerInfo{};
 		SamplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-		SamplerInfo.magFilter = VK_FILTER_LINEAR;
-		SamplerInfo.minFilter = VK_FILTER_LINEAR;
+		SamplerInfo.magFilter = Nearest ? VK_FILTER_NEAREST : VK_FILTER_LINEAR;
+		SamplerInfo.minFilter = Nearest ? VK_FILTER_NEAREST : VK_FILTER_LINEAR;
 		SamplerInfo.addressModeU = AddrModeU;
 		SamplerInfo.addressModeV = AddrModeV;
 		SamplerInfo.addressModeW = AddrModeW;
@@ -2871,10 +2888,10 @@ protected:
 		SamplerInfo.unnormalizedCoordinates = VK_FALSE;
 		SamplerInfo.compareEnable = VK_FALSE;
 		SamplerInfo.compareOp = VK_COMPARE_OP_ALWAYS;
-		SamplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-		SamplerInfo.mipLodBias = (m_GlobalTextureLodBIAS / 1000.0f);
-		SamplerInfo.minLod = -1000;
-		SamplerInfo.maxLod = 1000;
+		SamplerInfo.mipmapMode = Nearest ? VK_SAMPLER_MIPMAP_MODE_NEAREST : VK_SAMPLER_MIPMAP_MODE_LINEAR;
+		SamplerInfo.mipLodBias = Nearest ? 0.0f : (m_GlobalTextureLodBIAS / 1000.0f);
+		SamplerInfo.minLod = Nearest ? 0.0f : -1000.0f;
+		SamplerInfo.maxLod = Nearest ? 0.0f : 1000.0f; // Не даем использовать мипмапы для пикселей!
 
 		if(vkCreateSampler(m_VKDevice, &SamplerInfo, nullptr, &CreatedSampler) != VK_SUCCESS)
 		{
@@ -2887,9 +2904,14 @@ protected:
 	[[nodiscard]] bool CreateTextureSamplers()
 	{
 		bool Ret = true;
-		Ret &= CreateTextureSamplersImpl(m_aSamplers[SUPPORTED_SAMPLER_TYPE_REPEAT], VkSamplerAddressMode::VK_SAMPLER_ADDRESS_MODE_REPEAT, VkSamplerAddressMode::VK_SAMPLER_ADDRESS_MODE_REPEAT, VkSamplerAddressMode::VK_SAMPLER_ADDRESS_MODE_REPEAT);
-		Ret &= CreateTextureSamplersImpl(m_aSamplers[SUPPORTED_SAMPLER_TYPE_CLAMP_TO_EDGE], VkSamplerAddressMode::VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, VkSamplerAddressMode::VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, VkSamplerAddressMode::VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
-		Ret &= CreateTextureSamplersImpl(m_aSamplers[SUPPORTED_SAMPLER_TYPE_2D_TEXTURE_ARRAY], VkSamplerAddressMode::VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, VkSamplerAddressMode::VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, VkSamplerAddressMode::VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT);
+		Ret &= CreateTextureSamplersImpl(m_aSamplers[SUPPORTED_SAMPLER_TYPE_REPEAT], VkSamplerAddressMode::VK_SAMPLER_ADDRESS_MODE_REPEAT, VkSamplerAddressMode::VK_SAMPLER_ADDRESS_MODE_REPEAT, VkSamplerAddressMode::VK_SAMPLER_ADDRESS_MODE_REPEAT, false);
+		Ret &= CreateTextureSamplersImpl(m_aSamplers[SUPPORTED_SAMPLER_TYPE_CLAMP_TO_EDGE], VkSamplerAddressMode::VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, VkSamplerAddressMode::VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, VkSamplerAddressMode::VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, false);
+		Ret &= CreateTextureSamplersImpl(m_aSamplers[SUPPORTED_SAMPLER_TYPE_2D_TEXTURE_ARRAY], VkSamplerAddressMode::VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, VkSamplerAddressMode::VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, VkSamplerAddressMode::VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT, false);
+		Ret &= CreateTextureSamplersImpl(m_aSamplers[SUPPORTED_SAMPLER_TYPE_2D_TEXTURE_ARRAY_NEAREST], VkSamplerAddressMode::VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, VkSamplerAddressMode::VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, VkSamplerAddressMode::VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT, true); // <-- ДОБАВЛЕНО
+		
+		Ret &= CreateTextureSamplersImpl(m_aSamplers[SUPPORTED_SAMPLER_TYPE_REPEAT_NEAREST], VkSamplerAddressMode::VK_SAMPLER_ADDRESS_MODE_REPEAT, VkSamplerAddressMode::VK_SAMPLER_ADDRESS_MODE_REPEAT, VkSamplerAddressMode::VK_SAMPLER_ADDRESS_MODE_REPEAT, true);
+		Ret &= CreateTextureSamplersImpl(m_aSamplers[SUPPORTED_SAMPLER_TYPE_CLAMP_TO_EDGE_NEAREST], VkSamplerAddressMode::VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, VkSamplerAddressMode::VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, VkSamplerAddressMode::VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, true);
+		
 		return Ret;
 	}
 
@@ -2898,6 +2920,9 @@ protected:
 		vkDestroySampler(m_VKDevice, m_aSamplers[SUPPORTED_SAMPLER_TYPE_REPEAT], nullptr);
 		vkDestroySampler(m_VKDevice, m_aSamplers[SUPPORTED_SAMPLER_TYPE_CLAMP_TO_EDGE], nullptr);
 		vkDestroySampler(m_VKDevice, m_aSamplers[SUPPORTED_SAMPLER_TYPE_2D_TEXTURE_ARRAY], nullptr);
+		vkDestroySampler(m_VKDevice, m_aSamplers[SUPPORTED_SAMPLER_TYPE_REPEAT_NEAREST], nullptr);
+		vkDestroySampler(m_VKDevice, m_aSamplers[SUPPORTED_SAMPLER_TYPE_CLAMP_TO_EDGE_NEAREST], nullptr);
+		vkDestroySampler(m_VKDevice, m_aSamplers[SUPPORTED_SAMPLER_TYPE_2D_TEXTURE_ARRAY_NEAREST], nullptr);
 	}
 
 	VkSampler GetTextureSampler(ESupportedSamplerTypes SamplerType)

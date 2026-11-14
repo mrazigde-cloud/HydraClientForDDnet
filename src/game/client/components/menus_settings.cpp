@@ -8,6 +8,7 @@
 #include <base/math.h>
 #include <base/str.h>
 #include <base/net.h>
+#include <base/time.h>
 
 #include <engine/graphics.h>
 #include <engine/shared/config.h>
@@ -411,6 +412,485 @@ bool CMenus::RenderHslaScrollbars(CUIRect *pRect, unsigned int *pColor, bool Alp
 	}
 	return PrevPackedColor != *pColor;
 }
+void CMenus::ResetTestClientSettings()
+{
+	// ---- Name gradient (legacy, общий) ----
+	g_Config.m_ClNameGradient = 0;
+	g_Config.m_ClNameGradientOthers = 0;
+	g_Config.m_ClNameGradientSpeed = 30;
+	g_Config.m_ClNameGradientMode = 1;
+	g_Config.m_ClNameGradientWave = 1;
+	g_Config.m_ClNameGradientColor1 = 65408;
+	g_Config.m_ClNameGradientColor2 = 5635968;
+	g_Config.m_ClNameGradientColor3 = 11206528;
+
+	// ---- Name gradient: Own ----
+	g_Config.m_ClNameGradientOwn = 0;
+	g_Config.m_ClNameGradientOwnSpeed = 30;
+	g_Config.m_ClNameGradientOwnMode = 1;
+	g_Config.m_ClNameGradientOwnWave = 1;
+	g_Config.m_ClNameGradientOwnColor1 = 65408;
+	g_Config.m_ClNameGradientOwnColor2 = 5635968;
+	g_Config.m_ClNameGradientOwnColor3 = 11206528;
+
+	// ---- Name gradient: Friend ----
+	g_Config.m_ClNameGradientFriend = 0;
+	g_Config.m_ClNameGradientFriendSpeed = 30;
+	g_Config.m_ClNameGradientFriendMode = 1;
+	g_Config.m_ClNameGradientFriendWave = 1;
+	g_Config.m_ClNameGradientFriendColor1 = 15335296;
+	g_Config.m_ClNameGradientFriendColor2 = 1376128;
+	g_Config.m_ClNameGradientFriendColor3 = 2686848;
+
+	// ---- Name gradient: Other ----
+	g_Config.m_ClNameGradientOther = 0;
+	g_Config.m_ClNameGradientOtherSpeed = 30;
+	g_Config.m_ClNameGradientOtherMode = 1;
+	g_Config.m_ClNameGradientOtherWave = 1;
+	g_Config.m_ClNameGradientOtherColor1 = 8454016;
+	g_Config.m_ClNameGradientOtherColor2 = 13172608;
+	g_Config.m_ClNameGradientOtherColor3 = 11206528;
+
+	// ---- Trail: general ----
+	g_Config.m_ClTrailOwnFadeStyle = 0;
+	g_Config.m_ClTrailFriendFadeStyle = 0;
+	g_Config.m_ClTrailOtherFadeStyle = 0;
+	g_Config.m_ClTrail = 0;
+	g_Config.m_ClTrailDashSprite = 0;
+	str_copy(g_Config.m_ClTrailDashSpriteName, "trail_dash", sizeof(g_Config.m_ClTrailDashSpriteName));
+	g_Config.m_ClTrailDashRotate = 1;
+	g_Config.m_ClTrailDashSwing = 0;
+	g_Config.m_ClTrailDashSwingAngle = 45;
+	g_Config.m_ClTrailDashSwingSpeed = 100;
+
+	// ---- Trail: Own ----
+	g_Config.m_ClTrailOwn = 1;
+	g_Config.m_ClTrailOwnStyle = 0;
+	g_Config.m_ClTrailOwnSize = 8;
+	g_Config.m_ClTrailOwnRibbonWidth = 14;
+	g_Config.m_ClTrailOwnLifetime = 1000;
+	g_Config.m_ClTrailOwnFadeTime = 500;
+	g_Config.m_ClTrailOwnNarrowTime = 0;
+	g_Config.m_ClTrailOwnColorMode = 0;
+	g_Config.m_ClTrailOwnColor = 65408;
+	g_Config.m_ClTrailOwnSpacing = 15;
+
+	// ---- Trail: Friend ----
+	g_Config.m_ClTrailFriend = 1;
+	g_Config.m_ClTrailFriendStyle = 0;
+	g_Config.m_ClTrailFriendSize = 8;
+	g_Config.m_ClTrailFriendRibbonWidth = 14;
+	g_Config.m_ClTrailFriendLifetime = 1000;
+	g_Config.m_ClTrailFriendFadeTime = 500;
+	g_Config.m_ClTrailFriendFadeStyle = 0;
+	g_Config.m_ClTrailFriendNarrowTime = 0;
+	g_Config.m_ClTrailFriendColorMode = 0;
+	g_Config.m_ClTrailFriendColor = 16711808;
+
+	// ---- Trail: Other ----
+	g_Config.m_ClTrailOther = 1;
+	g_Config.m_ClTrailOtherStyle = 0;
+	g_Config.m_ClTrailOtherSize = 8;
+	g_Config.m_ClTrailOtherRibbonWidth = 14;
+	g_Config.m_ClTrailOtherLifetime = 1000;
+	g_Config.m_ClTrailOtherFadeTime = 500;
+	g_Config.m_ClTrailOtherFadeStyle = 0;
+	g_Config.m_ClTrailOtherNarrowTime = 0;
+	g_Config.m_ClTrailOtherColorMode = 0;
+	g_Config.m_ClTrailOtherColor = 11206528;
+
+	// ---- Weather ----
+	g_Config.m_ClWeather = 0;
+	g_Config.m_ClWeatherSnowCount = 300;
+	g_Config.m_ClWeatherSnowSpeed = 100;
+	g_Config.m_ClWeatherSnowSize = 100;
+	g_Config.m_ClWeatherSnowOpacity = 80;
+	g_Config.m_ClWeatherSnowTileCollideChance = 85;
+	g_Config.m_ClWeatherSnowColor = 0xFFFFFFFF;
+
+	// ---- Test client: emote cycle ----
+	g_Config.m_ClTestClientEmoteCycle = 0;
+	g_Config.m_ClTestClientEmoteDelay = 100;
+	g_Config.m_ClTestClientEmoteSet = 0;
+	g_Config.m_ClTestClientEmoteCount = 3;
+	g_Config.m_ClTestClientEmoteCustom1 = 5;
+	g_Config.m_ClTestClientEmoteCustom2 = 2;
+	g_Config.m_ClTestClientEmoteCustom3 = 14;
+	g_Config.m_ClTestClientEmoteCustom4 = 0;
+	g_Config.m_ClTestClientEmoteCustom5 = 0;
+	g_Config.m_ClTestClientEmoteCustom6 = 0;
+	g_Config.m_ClTestClientEmoteCustom7 = 0;
+	g_Config.m_ClTestClientEmoteCustom8 = 0;
+
+	// ---- Extra ----
+	g_Config.m_ClExtraAutoSwitch = 1;
+}
+
+void CMenus::DrawNameGradientPreview(CUIRect Rect, unsigned int Color1, unsigned int Color2, unsigned int Color3, bool Wave)
+{
+	Rect.Draw(ColorRGBA(0.08f, 0.08f, 0.12f, 0.7f), IGraphics::CORNER_ALL, 3.0f);
+	Rect.Margin(3.0f, &Rect);
+
+	static const int64_t s_StartTime = time();
+	const float Freq = (float)time_freq();
+	const float T = (float)(time() - s_StartTime) / Freq;
+
+	ColorHSLA H1 = ColorHSLA(Color1);
+	ColorHSLA H2 = ColorHSLA(Color2);
+	ColorHSLA H3 = ColorHSLA(Color3);
+	if(Wave)
+	{
+		// Rotate hue palette continuously; all three shift together so
+		// the gradient keeps its shape but slides through the color wheel.
+		const float Shift = T * 0.15f;
+		H1.h = fmodf(H1.h + Shift + 1.0f, 1.0f);
+		H2.h = fmodf(H2.h + Shift + 1.0f, 1.0f);
+		H3.h = fmodf(H3.h + Shift + 1.0f, 1.0f);
+	}
+	const ColorRGBA C1 = color_cast<ColorRGBA>(H1);
+	const ColorRGBA C2 = color_cast<ColorRGBA>(H2);
+	const ColorRGBA C3 = color_cast<ColorRGBA>(H3);
+
+	Graphics()->TextureClear();
+	Graphics()->BlendNormal();
+	Graphics()->QuadsBegin();
+
+	// Left half: C1 -> C2
+	Graphics()->SetColor4(C1, C2, C2, C1);
+	{
+		IGraphics::CFreeformItem F(
+			Rect.x, Rect.y,
+			Rect.x + Rect.w * 0.5f, Rect.y,
+			Rect.x, Rect.y + Rect.h,
+			Rect.x + Rect.w * 0.5f, Rect.y + Rect.h);
+		Graphics()->QuadsDrawFreeform(&F, 1);
+	}
+
+	// Right half: C2 -> C3
+	Graphics()->SetColor4(C2, C3, C3, C2);
+	{
+		IGraphics::CFreeformItem F(
+			Rect.x + Rect.w * 0.5f, Rect.y,
+			Rect.x + Rect.w, Rect.y,
+			Rect.x + Rect.w * 0.5f, Rect.y + Rect.h,
+			Rect.x + Rect.w, Rect.y + Rect.h);
+		Graphics()->QuadsDrawFreeform(&F, 1);
+	}
+
+	Graphics()->QuadsEnd();
+	Graphics()->SetColor(1.0f, 1.0f, 1.0f, 1.0f);
+
+	(void)Wave; // будущее: анимация волны
+}
+
+void CMenus::DrawTrailPreview(CUIRect Rect, int Group)
+{
+	Rect.Draw(ColorRGBA(0.08f, 0.08f, 0.12f, 0.7f), IGraphics::CORNER_ALL, 3.0f);
+	Rect.Margin(6.0f, &Rect);
+
+	int Style, Size, RibbonWidth, ColorMode, NarrowTime, Spacing, Lifetime, FadeTime, FadeStyle;
+	unsigned int TrailColor;
+	if (Group == 0)
+	{
+		Style = g_Config.m_ClTrailOwnStyle;
+		Size = g_Config.m_ClTrailOwnSize;
+		RibbonWidth = g_Config.m_ClTrailOwnRibbonWidth;
+		ColorMode = g_Config.m_ClTrailOwnColorMode;
+		TrailColor = g_Config.m_ClTrailOwnColor;
+		NarrowTime = g_Config.m_ClTrailOwnNarrowTime;
+		Spacing = g_Config.m_ClTrailOwnSpacing;
+		Lifetime = g_Config.m_ClTrailOwnLifetime;
+		FadeTime = g_Config.m_ClTrailOwnFadeTime;
+		FadeStyle = g_Config.m_ClTrailOwnFadeStyle;
+	}
+	else if (Group == 1)
+	{
+		Style = g_Config.m_ClTrailFriendStyle;
+		Size = g_Config.m_ClTrailFriendSize;
+		RibbonWidth = g_Config.m_ClTrailFriendRibbonWidth;
+		ColorMode = g_Config.m_ClTrailFriendColorMode;
+		TrailColor = g_Config.m_ClTrailFriendColor;
+		NarrowTime = g_Config.m_ClTrailFriendNarrowTime;
+		Spacing = g_Config.m_ClTrailFriendSpacing;
+		Lifetime = g_Config.m_ClTrailFriendLifetime;
+		FadeTime = g_Config.m_ClTrailFriendFadeTime;
+		FadeStyle = g_Config.m_ClTrailFriendFadeStyle;
+	}
+	else
+	{
+		Style = g_Config.m_ClTrailOtherStyle;
+		Size = g_Config.m_ClTrailOtherSize;
+		RibbonWidth = g_Config.m_ClTrailOtherRibbonWidth;
+		ColorMode = g_Config.m_ClTrailOtherColorMode;
+		TrailColor = g_Config.m_ClTrailOtherColor;
+		NarrowTime = g_Config.m_ClTrailOtherNarrowTime;
+		Spacing = g_Config.m_ClTrailOtherSpacing;
+		Lifetime = g_Config.m_ClTrailOtherLifetime;
+		FadeTime = g_Config.m_ClTrailOtherFadeTime;
+		FadeStyle = g_Config.m_ClTrailOtherFadeStyle;
+	}
+
+	if (Spacing < 1) Spacing = 1;
+	if (Lifetime < 1) Lifetime = 1;
+
+	// Точная копия логики ComputeAlpha из trails.cpp
+	auto ComputeAlphaMenu = [&](float Age) -> float {
+		if(Age >= Lifetime) return 0.0f;
+		float Fade = (float)std::min(FadeTime, Lifetime);
+		if(Fade <= 0) return 1.0f;
+		if(Age > Lifetime - Fade) {
+			return std::clamp(1.0f - (Age - (Lifetime - Fade)) / Fade, 0.0f, 1.0f);
+		}
+		return 1.0f;
+	};
+
+	// Точная копия ComputeWidthFactor из trails.cpp
+	auto ComputeWidthFactorMenu = [&](float Age) -> float {
+		if(NarrowTime <= 0) return 1.0f;
+		if(Age >= NarrowTime) return 1.0f;
+		if(Age <= 0) return 0.05f;
+		float t = Age / (float)NarrowTime;
+		return std::clamp(t * t * (3.0f - 2.0f * t), 0.05f, 1.0f);
+	};
+
+	// Точная копия ComputeFadeSizeFactor из trails.cpp
+	auto ComputeFadeSizeFactorMenu = [&](float Age) -> float {
+		if(FadeStyle == 0) return 1.0f;
+		if(Age >= Lifetime) return 0.0f;
+		float Fade = (float)std::min(FadeTime, Lifetime);
+		if(Fade <= 0) return 1.0f;
+		if(Age > Lifetime - Fade)
+		{
+			float p = (Age - (Lifetime - Fade)) / Fade;
+			if(FadeStyle == 1) return 1.0f - p;
+			if(FadeStyle == 2) return 1.0f - (p * p);
+		}
+		return 1.0f;
+	};
+
+	// Вписываем большие размеры в высоту прямоугольника
+	const float MaxFitWidth = Rect.h * 0.45f;
+	float DrawScale = 1.0f;
+	if(Style == 0 && Size > 0)
+		DrawScale = std::min(1.0f, MaxFitWidth / (float)Size);
+	else if((Style == 1 || Style == 2) && RibbonWidth > 0)
+		DrawScale = std::min(1.0f, MaxFitWidth / (float)RibbonWidth);
+
+	float DrawnHalf = 0.0f;
+	if(Style == 0)
+		DrawnHalf = (float)Size * DrawScale * 0.5f;
+	else if(Style == 1)
+		DrawnHalf = (float)RibbonWidth * DrawScale * 0.5f;
+	else
+		DrawnHalf = ((float)RibbonWidth / 4.0f + 3.5f) * DrawScale;
+
+	const float AvailableHalf = Rect.h * 0.5f - DrawnHalf - 1.5f;
+	const float SineAmp = std::min(Rect.h * 0.3f, std::max(0.0f, AvailableHalf));
+	
+	// Анимация волны (двигается слева направо)
+	static const int64_t s_PreviewStartTime = time();
+	const float Freq = (float)time_freq();
+	const float T = (float)(time() - s_PreviewStartTime) / Freq;
+	
+	float WavePhase = T * 1.8f;
+
+	auto GetPathPos = [&](float t) {
+		float x = Rect.x + 4.0f + t * (Rect.w - 8.0f);
+		float y = Rect.y + Rect.h * 0.5f + sinf(t * 6.28318f - WavePhase) * SineAmp;
+		return vec2(x, y);
+	};
+
+	struct PreviewPoint {
+		vec2 m_Pos;
+		vec2 m_Dir;
+		float m_Age;
+		int m_Id;
+	};
+	std::vector<PreviewPoint> vPoints;
+
+	const float PathLen = Rect.w - 8.0f;
+	// Шаг по оси X жестко привязан к настройке Spacing
+	const float dT = std::max(0.005f, (float)Spacing / PathLen);
+	int IdCounter = 0;
+
+	// Идем от головы (t=1.0) к хвосту (t=0.0)
+	for(float t = 1.0f; t >= -0.001f; t -= dT)
+	{
+		vec2 P = GetPathPos(t);
+		
+		// Направление движения (вектор от хвоста к голове, т.е. слева направо)
+		vec2 NextP = GetPathPos(t + 0.01f);
+		vec2 PrevP = GetPathPos(t - 0.01f);
+		vec2 Dir = normalize(NextP - PrevP);
+		
+		// Возраст точки зависит от того, насколько она далеко от головы
+		float Age = (1.0f - t) * (float)Lifetime;
+		
+		vPoints.push_back({P, Dir, Age, IdCounter++});
+	}
+
+	Graphics()->TextureClear();
+	Graphics()->QuadsSetRotation(0.0f);
+
+	auto GetColor = [&](int Id) -> ColorRGBA {
+		if(ColorMode == 1) {
+			float Hue = fmodf((float)Id * 0.17f + 0.13f, 1.0f);
+			return color_cast<ColorRGBA>(ColorHSLA(Hue, 1.0f, 0.5f, 1.0f));
+		}
+		return color_cast<ColorRGBA>(ColorHSLA(TrailColor));
+	};
+
+	if(Style == 0) // Dashes
+	{
+		const auto Tex = GameClient()->m_Trails.GetDashTrailTexture();
+		const bool HasSprite = g_Config.m_ClTrailDashSprite != 0 && Tex.IsValid() && !Tex.IsNullTexture();
+		const float SpriteSizeMult = HasSprite ? (g_Config.m_ClTrailDashSpriteSize / 100.0f) : 1.0f;
+		
+		Graphics()->BlendNormal();
+		if(HasSprite)
+		{
+			Graphics()->TextureSet(Tex);
+			Graphics()->WrapClamp();
+		}
+		Graphics()->QuadsBegin();
+
+		for(const auto &pt : vPoints)
+		{
+			float Alpha = ComputeAlphaMenu(pt.m_Age);
+			if(Alpha < 0.01f) continue;
+			
+			float WFactor = ComputeWidthFactorMenu(pt.m_Age) * ComputeFadeSizeFactorMenu(pt.m_Age);
+			float W = (float)Size * DrawScale * WFactor * SpriteSizeMult;
+			
+			ColorRGBA Color = GetColor(pt.m_Id);
+			Color.a = Alpha;
+			Graphics()->SetColor(Color);
+			
+			float Rot = 0.0f;
+			if(!HasSprite || g_Config.m_ClTrailDashRotate)
+				Rot = atan2f(pt.m_Dir.y, pt.m_Dir.x);
+			Graphics()->QuadsSetRotation(Rot);
+			
+			const float DashLen = HasSprite ? W : W * 2.0f;
+			IGraphics::CQuadItem Item(pt.m_Pos.x - DashLen * 0.5f, pt.m_Pos.y - W * 0.5f, DashLen, W);
+			Graphics()->QuadsDrawTL(&Item, 1);
+		}
+		Graphics()->QuadsSetRotation(0.0f);
+		Graphics()->QuadsEnd();
+		
+		if(HasSprite)
+		{
+			Graphics()->TextureClear();
+			Graphics()->WrapNormal();
+		}
+	}
+	else if(Style == 1) // Ribbon
+	{
+		Graphics()->BlendNormal();
+		Graphics()->QuadsBegin();
+		const float HalfW = (float)RibbonWidth * 0.5f * DrawScale;
+		
+		for(size_t i = 1; i < vPoints.size(); i++)
+		{
+			const auto &p0 = vPoints[i - 1];
+			const auto &p1 = vPoints[i];
+			
+			float A0 = ComputeAlphaMenu(p0.m_Age);
+			float A1 = ComputeAlphaMenu(p1.m_Age);
+			if(A0 < 0.01f && A1 < 0.01f) continue;
+			
+			ColorRGBA C0 = GetColor(p0.m_Id); C0.a = A0;
+			ColorRGBA C1 = GetColor(p1.m_Id); C1.a = A1;
+			
+			float W0 = ComputeWidthFactorMenu(p0.m_Age) * ComputeFadeSizeFactorMenu(p0.m_Age);
+			float W1 = ComputeWidthFactorMenu(p1.m_Age) * ComputeFadeSizeFactorMenu(p1.m_Age);
+			
+			vec2 Perp0(-p0.m_Dir.y, p0.m_Dir.x);
+			vec2 Perp1(-p1.m_Dir.y, p1.m_Dir.x);
+			
+			vec2 TL = p0.m_Pos + Perp0 * (HalfW * W0);
+			vec2 TR = p0.m_Pos - Perp0 * (HalfW * W0);
+			vec2 BL = p1.m_Pos + Perp1 * (HalfW * W1);
+			vec2 BR = p1.m_Pos - Perp1 * (HalfW * W1);
+			
+			Graphics()->SetColor4(C0, C0, C1, C1);
+			IGraphics::CFreeformItem F(TL.x, TL.y, TR.x, TR.y, BL.x, BL.y, BR.x, BR.y);
+			Graphics()->QuadsDrawFreeform(&F, 1);
+		}
+		Graphics()->QuadsEnd();
+	}
+	else // Neon
+	{
+		Graphics()->BlendAdditive();
+		Graphics()->QuadsBegin();
+		const int Strands = 3;
+		const float SpacingStrand = (float)RibbonWidth / (float)(Strands + 1) * DrawScale;
+		const float GlowW = 3.5f * DrawScale;
+		const float CoreW = 1.0f * DrawScale;
+
+		for(size_t i = 1; i < vPoints.size(); i++)
+		{
+			const auto &p0 = vPoints[i - 1];
+			const auto &p1 = vPoints[i];
+			
+			float A0 = ComputeAlphaMenu(p0.m_Age);
+			float A1 = ComputeAlphaMenu(p1.m_Age);
+			if(A0 < 0.01f && A1 < 0.01f) continue;
+			
+			float W0 = ComputeWidthFactorMenu(p0.m_Age) * ComputeFadeSizeFactorMenu(p0.m_Age);
+			float W1 = ComputeWidthFactorMenu(p1.m_Age) * ComputeFadeSizeFactorMenu(p1.m_Age);
+
+			vec2 D = p1.m_Pos - p0.m_Pos;
+			if(length(D) < 0.01f) continue;
+			D = normalize(D);
+			vec2 Perp(-D.y, D.x);
+
+			for(int s = 0; s < Strands; s++)
+			{
+				const float Tw = 0.82f + 0.18f * sinf(T * 2.5f + (float)s * 1.7f);
+				const float Off = ((float)s - (Strands - 1) * 0.5f) * SpacingStrand;
+				
+				vec2 P0 = p0.m_Pos + vec2(-p0.m_Dir.y, p0.m_Dir.x) * (Off * W0);
+				vec2 P1 = p1.m_Pos + vec2(-p1.m_Dir.y, p1.m_Dir.x) * (Off * W1);
+
+				ColorRGBA C0 = GetColor(p0.m_Id); C0.a = A0 * Tw;
+				ColorRGBA C1 = GetColor(p1.m_Id); C1.a = A1 * Tw;
+
+				ColorRGBA C0Glow = C0; C0Glow.a *= 0.18f;
+				ColorRGBA C1Glow = C1; C1Glow.a *= 0.18f;
+				Graphics()->SetColor4(C0Glow, C0Glow, C1Glow, C1Glow);
+				{
+					float W0g = GlowW * W0;
+					float W1g = GlowW * W1;
+					IGraphics::CFreeformItem F(
+						P0.x - Perp.x * W0g, P0.y - Perp.y * W0g,
+						P0.x + Perp.x * W0g, P0.y + Perp.y * W0g,
+						P1.x - Perp.x * W1g, P1.y - Perp.y * W1g,
+						P1.x + Perp.x * W1g, P1.y + Perp.y * W1g);
+					Graphics()->QuadsDrawFreeform(&F, 1);
+				}
+				
+				ColorRGBA C0Core = C0; C0Core.a *= 0.95f;
+				ColorRGBA C1Core = C1; C1Core.a *= 0.95f;
+				Graphics()->SetColor4(C0Core, C0Core, C1Core, C1Core);
+				{
+					float W0c = CoreW * W0;
+					float W1c = CoreW * W1;
+					IGraphics::CFreeformItem F(
+						P0.x - Perp.x * W0c, P0.y - Perp.y * W0c,
+						P0.x + Perp.x * W0c, P0.y + Perp.y * W0c,
+						P1.x - Perp.x * W1c, P1.y - Perp.y * W1c,
+						P1.x + Perp.x * W1c, P1.y + Perp.y * W1c);
+					Graphics()->QuadsDrawFreeform(&F, 1);
+				}
+			}
+		}
+		Graphics()->QuadsEnd();
+		Graphics()->BlendNormal();
+	}
+
+	Graphics()->SetColor(1.0f, 1.0f, 1.0f, 1.0f);
+}
 void CMenus::RenderSettingsTestClient(CUIRect MainView)
 {
 	CUIRect Label, Button, Left, Right, Middle;
@@ -424,6 +904,27 @@ void CMenus::RenderSettingsTestClient(CUIRect MainView)
 		NUMBER_OF_TESTCLIENT_TABS = 4,
 	};
 	static int s_CurTab = TESTCLIENT_TAB_GENERAL;
+
+	// Reset button row (always visible, above the tabs).
+	{
+		CUIRect ResetRow;
+		MainView.HSplitTop(22.0f, &ResetRow, &MainView);
+		MainView.HSplitTop(6.0f, nullptr, &MainView);
+
+		CUIRect ResetButton;
+		ResetRow.VSplitRight(220.0f, nullptr, &ResetButton);
+		static CButtonContainer s_ResetButton;
+		if(DoButton_Menu(&s_ResetButton, Localize("Reset Hydra settings to defaults"), 0, &ResetButton))
+		{
+			PopupConfirm(
+				Localize("Reset Hydra settings"),
+				Localize("Are you sure you want to reset all Hydra settings to defaults? This cannot be undone."),
+				Localize("Reset"),
+				Localize("Cancel"),
+				&CMenus::ResetTestClientSettings);
+		}
+	}
+
 	{
 		CUIRect TabBar;
 		MainView.HSplitTop(20.0f, &TabBar, &MainView);
@@ -445,7 +946,6 @@ void CMenus::RenderSettingsTestClient(CUIRect MainView)
 	}
 
 	// ***** Name Gradient tab ***** //
-	// ***** Name Gradient tab ***** //
 	if(s_CurTab == TESTCLIENT_TAB_NAME_GRADIENT)
 	{
 		const float LineSize = 20.0f;
@@ -459,10 +959,19 @@ void CMenus::RenderSettingsTestClient(CUIRect MainView)
 		static int s_aModeButtons[3][2];
 		static CButtonContainer s_aColorButtons[3][3];
 
+		static CScrollRegion s_NameGradientScrollRegion;
+		CScrollRegionParams NGScrollParams;
+		NGScrollParams.m_ScrollUnit = 60.0f;
+		s_NameGradientScrollRegion.Begin(&MainView, &NGScrollParams);
+		const float StartY = MainView.y;
+
+		// Returns the total vertical height consumed by this group.
 		auto DoGroup = [&](int Index, CUIRect View, const char *pTitle, int *pEnable, int *pSpeed, int *pMode, int *pWave,
 					unsigned int *pColor1, unsigned int *pColor2, unsigned int *pColor3,
-					ColorRGBA Default1, ColorRGBA Default2, ColorRGBA Default3) {
+					ColorRGBA Default1, ColorRGBA Default2, ColorRGBA Default3) -> float {
+			const float GroupStartY = View.y;
 			CUIRect Row, ModeConstant, ModeLinear;
+
 			Ui()->DoLabel_AutoLineSize(pTitle, HeadlineFontSize, TEXTALIGN_ML, &View, HeadlineHeight);
 			View.HSplitTop(MarginSmall, nullptr, &View);
 
@@ -483,6 +992,14 @@ void CMenus::RenderSettingsTestClient(CUIRect MainView)
 			DoLine_ColorPicker(&s_aColorButtons[Index][0], ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &View, Localize("Color 1"), pColor1, Default1, false);
 			DoLine_ColorPicker(&s_aColorButtons[Index][1], ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &View, Localize("Color 2"), pColor2, Default2, false);
 			DoLine_ColorPicker(&s_aColorButtons[Index][2], ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &View, Localize("Color 3"), pColor3, Default3, false);
+
+			// Preview strip
+			View.HSplitTop(MarginSmall, nullptr, &View);
+			CUIRect PreviewRect;
+			View.HSplitTop(36.0f, &PreviewRect, &View);
+			DrawNameGradientPreview(PreviewRect, *pColor1, *pColor2, *pColor3, *pWave != 0);
+
+			return View.y - GroupStartY;
 		};
 
 		CUIRect OwnView, FriendView, OtherView, Rest;
@@ -493,24 +1010,38 @@ void CMenus::RenderSettingsTestClient(CUIRect MainView)
 		Rest.VSplitLeft(ColumnWidth, &FriendView, &Rest);
 		Rest.VSplitLeft(ColumnGap, nullptr, &OtherView);
 
-		DoGroup(0, OwnView, Localize("Me (main, dummy, extra)"),
+		const float H0 = DoGroup(0, OwnView, Localize("Me (main, dummy, extra)"),
 			&g_Config.m_ClNameGradientOwn, &g_Config.m_ClNameGradientOwnSpeed, &g_Config.m_ClNameGradientOwnMode, &g_Config.m_ClNameGradientOwnWave,
 			&g_Config.m_ClNameGradientOwnColor1, &g_Config.m_ClNameGradientOwnColor2, &g_Config.m_ClNameGradientOwnColor3,
 			ColorRGBA(1.0f, 0.0f, 0.0f), ColorRGBA(0.0f, 1.0f, 0.0f), ColorRGBA(0.0f, 0.0f, 1.0f));
-		DoGroup(1, FriendView, Localize("Friends"),
+		const float H1 = DoGroup(1, FriendView, Localize("Friends"),
 			&g_Config.m_ClNameGradientFriend, &g_Config.m_ClNameGradientFriendSpeed, &g_Config.m_ClNameGradientFriendMode, &g_Config.m_ClNameGradientFriendWave,
 			&g_Config.m_ClNameGradientFriendColor1, &g_Config.m_ClNameGradientFriendColor2, &g_Config.m_ClNameGradientFriendColor3,
 			ColorRGBA(1.0f, 0.4f, 0.7f), ColorRGBA(1.0f, 0.6f, 0.2f), ColorRGBA(1.0f, 0.9f, 0.2f));
-		DoGroup(2, OtherView, Localize("Others"),
+		const float H2 = DoGroup(2, OtherView, Localize("Others"),
 			&g_Config.m_ClNameGradientOther, &g_Config.m_ClNameGradientOtherSpeed, &g_Config.m_ClNameGradientOtherMode, &g_Config.m_ClNameGradientOtherWave,
 			&g_Config.m_ClNameGradientOtherColor1, &g_Config.m_ClNameGradientOtherColor2, &g_Config.m_ClNameGradientOtherColor3,
 			ColorRGBA(0.0f, 1.0f, 1.0f), ColorRGBA(0.8f, 0.0f, 1.0f), ColorRGBA(0.0f, 0.0f, 1.0f));
 
+		CUIRect UsedRect = MainView;
+		UsedRect.y = StartY;
+		UsedRect.h = std::max({H0, H1, H2}) + 10.0f;
+		s_NameGradientScrollRegion.AddRect(UsedRect);
+
+		s_NameGradientScrollRegion.End();
 		return;
 	}
 	// ***** Trail tab ***** //
 	if(s_CurTab == TESTCLIENT_TAB_TRAIL)
 	{
+		// Обновляем список спрайтов, когда заходим в меню
+		static bool s_SpritesLoaded = false;
+		if(!s_SpritesLoaded)
+		{
+			GameClient()->m_Trails.RefreshAvailableSprites();
+			s_SpritesLoaded = true;
+		}
+
 		const float LineSize = 20.0f;
 		const float ColorPickerLineSize = 25.0f;
 		const float ColorPickerLabelSize = 13.0f;
@@ -524,6 +1055,12 @@ void CMenus::RenderSettingsTestClient(CUIRect MainView)
 		static CButtonContainer s_aTrailModeRandom[3];
 		static CButtonContainer s_aTrailColorPicker[3];
 
+		static CScrollRegion s_TrailScrollRegion;
+		CScrollRegionParams TrailScrollParams;
+		TrailScrollParams.m_ScrollUnit = 60.0f;
+		s_TrailScrollRegion.Begin(&MainView, &TrailScrollParams);
+		const float StartY = MainView.y;
+
 		CUIRect Left, Right, Button, Row;
 
 		MainView.VSplitMid(&Left, &Right, 20.0f);
@@ -531,20 +1068,7 @@ void CMenus::RenderSettingsTestClient(CUIRect MainView)
 		// ---- Global settings (left) ----
 		Ui()->DoLabel_AutoLineSize(Localize("Trail"), HeadlineFontSize, TEXTALIGN_ML, &Left, HeadlineHeight);
 		Left.HSplitTop(MarginSmall, nullptr, &Left);
-
 		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_ClTrail, Localize("Enable trails"), &g_Config.m_ClTrail, &Left, LineSize);
-
-		Left.HSplitTop(LineSize, &Button, &Left);
-		Ui()->DoScrollbarOption(&g_Config.m_ClTrailSize, &g_Config.m_ClTrailSize, &Button, Localize("Segment size"), 1, 50);
-
-		Left.HSplitTop(LineSize, &Button, &Left);
-		Ui()->DoScrollbarOption(&g_Config.m_ClTrailLifetime, &g_Config.m_ClTrailLifetime, &Button, Localize("Lifetime (ms)"), 100, 5000);
-
-		Left.HSplitTop(LineSize, &Button, &Left);
-		Ui()->DoScrollbarOption(&g_Config.m_ClTrailFadeTime, &g_Config.m_ClTrailFadeTime, &Button, Localize("Fade time (ms)"), 0, 5000);
-
-		Left.HSplitTop(LineSize, &Button, &Left);
-		Ui()->DoScrollbarOption(&g_Config.m_ClTrailSpacing, &g_Config.m_ClTrailSpacing, &Button, Localize("Spacing"), 1, 100);
 
 		// ---- Per-group colors (right) ----
 		Ui()->DoLabel_AutoLineSize(Localize("Colors per group"), HeadlineFontSize, TEXTALIGN_ML, &Right, HeadlineHeight);
@@ -554,14 +1078,30 @@ void CMenus::RenderSettingsTestClient(CUIRect MainView)
 		{
 			const char *m_pTitle;
 			int *m_pEnable;
+			int *m_pStyle;
+			int *m_pSize;
+			int *m_pRibbonWidth;
 			int *m_pColorMode;
 			unsigned int *m_pColor;
+			int *m_pSpacing;
+			int *m_pLifetime;
+			int *m_pFadeTime;
+			int *m_pFadeStyle;
+			int *m_pNarrowTime;
 		};
 		const SGroup aGroups[3] = {
-			{Localize("Own"), &g_Config.m_ClTrailOwn, &g_Config.m_ClTrailOwnColorMode, &g_Config.m_ClTrailOwnColor},
-			{Localize("Friends"), &g_Config.m_ClTrailFriend, &g_Config.m_ClTrailFriendColorMode, &g_Config.m_ClTrailFriendColor},
-			{Localize("Others"), &g_Config.m_ClTrailOther, &g_Config.m_ClTrailOtherColorMode, &g_Config.m_ClTrailOtherColor},
+			{Localize("Own"), &g_Config.m_ClTrailOwn, &g_Config.m_ClTrailOwnStyle, &g_Config.m_ClTrailOwnSize, &g_Config.m_ClTrailOwnRibbonWidth,
+				&g_Config.m_ClTrailOwnColorMode, &g_Config.m_ClTrailOwnColor, &g_Config.m_ClTrailOwnSpacing,
+				&g_Config.m_ClTrailOwnLifetime, &g_Config.m_ClTrailOwnFadeTime, &g_Config.m_ClTrailOwnFadeStyle, &g_Config.m_ClTrailOwnNarrowTime},
+			{Localize("Friends"), &g_Config.m_ClTrailFriend, &g_Config.m_ClTrailFriendStyle, &g_Config.m_ClTrailFriendSize, &g_Config.m_ClTrailFriendRibbonWidth,
+				&g_Config.m_ClTrailFriendColorMode, &g_Config.m_ClTrailFriendColor, &g_Config.m_ClTrailFriendSpacing,
+				&g_Config.m_ClTrailFriendLifetime, &g_Config.m_ClTrailFriendFadeTime, &g_Config.m_ClTrailFriendFadeStyle, &g_Config.m_ClTrailFriendNarrowTime},
+			{Localize("Others"), &g_Config.m_ClTrailOther, &g_Config.m_ClTrailOtherStyle, &g_Config.m_ClTrailOtherSize, &g_Config.m_ClTrailOtherRibbonWidth,
+				&g_Config.m_ClTrailOtherColorMode, &g_Config.m_ClTrailOtherColor, &g_Config.m_ClTrailOtherSpacing,
+				&g_Config.m_ClTrailOtherLifetime, &g_Config.m_ClTrailOtherFadeTime, &g_Config.m_ClTrailOtherFadeStyle, &g_Config.m_ClTrailOtherNarrowTime},
 		};
+
+		static CButtonContainer s_aTrailStyleButtons[3][3];
 
 		for(int Group = 0; Group < 3; ++Group)
 		{
@@ -571,6 +1111,142 @@ void CMenus::RenderSettingsTestClient(CUIRect MainView)
 			if(!*aGroups[Group].m_pEnable)
 				continue;
 
+			// Style row: Dashes / Ribbon / Neon
+			Right.HSplitTop(LineSize, &Row, &Right);
+			CUIRect StyleDash, StyleRibbon, StyleNeon;
+			Row.VSplitLeft(Row.w / 3.0f, &StyleDash, &Row);
+			Row.VSplitLeft(Row.w / 2.0f, &StyleRibbon, &StyleNeon);
+			if(DoButton_CheckBox(&s_aTrailStyleButtons[Group][0], Localize("Dashes"), *aGroups[Group].m_pStyle == 0, &StyleDash))
+				*aGroups[Group].m_pStyle = 0;
+			if(DoButton_CheckBox(&s_aTrailStyleButtons[Group][1], Localize("Ribbon"), *aGroups[Group].m_pStyle == 1, &StyleRibbon))
+				*aGroups[Group].m_pStyle = 1;
+			if(DoButton_CheckBox(&s_aTrailStyleButtons[Group][2], Localize("Neon"), *aGroups[Group].m_pStyle == 2, &StyleNeon))
+				*aGroups[Group].m_pStyle = 2;
+
+			// Size row — depends on style (dash: segment size, ribbon/neon: ribbon width)
+			if(*aGroups[Group].m_pStyle == 0)
+			{
+				Right.HSplitTop(LineSize, &Row, &Right);
+				Ui()->DoScrollbarOption(aGroups[Group].m_pSize, aGroups[Group].m_pSize, &Row, Localize("Dash size"), 1, 50);
+
+				// Dash sprite toggle (global for all groups).
+				static CButtonContainer s_aDashSpriteToggle[3];
+				Right.HSplitTop(LineSize, &Row, &Right);
+				if(DoButton_CheckBox(&s_aDashSpriteToggle[Group], Localize("Use sprite"), g_Config.m_ClTrailDashSprite, &Row))
+					g_Config.m_ClTrailDashSprite ^= 1;
+
+				if(g_Config.m_ClTrailDashSprite)
+				{
+					// Selected Sprite info
+					Right.HSplitTop(LineSize, &Row, &Right);
+					char aBuf[128];
+					str_format(aBuf, sizeof(aBuf), "%s: %s", Localize("Selected sprite"), g_Config.m_ClTrailDashSpriteName);
+					Ui()->DoLabel(&Row, aBuf, 14.0f, TEXTALIGN_ML);
+
+					// Header row: Label and Refresh button
+					Right.HSplitTop(LineSize, &Row, &Right);
+					CUIRect LabelRect, RefreshBtn;
+					Row.VSplitRight(80.0f, &LabelRect, &RefreshBtn);
+					Ui()->DoLabel(&LabelRect, Localize("Available sprites:"), 14.0f, TEXTALIGN_ML);
+					
+					static CButtonContainer s_aRefreshSprites[3];
+					if(DoButton_Menu(&s_aRefreshSprites[Group], Localize("Refresh"), 0, &RefreshBtn))
+						GameClient()->m_Trails.RefreshAvailableSprites();
+
+					const auto &vSprites = GameClient()->m_Trails.GetAvailableSprites();
+					
+					// Sprite buttons grid (Thumbnails)
+					if(!vSprites.empty())
+					{
+						static CButtonContainer s_aSpriteButtons[3][32];
+						const int SpritesPerRow = 4;
+						const float ThumbSize = 40.0f;
+						int Col = 0;
+						
+						for(size_t s = 0; s < vSprites.size() && s < 32; ++s)
+						{
+							if(Col == 0)
+								Right.HSplitTop(ThumbSize + 4.0f, &Row, &Right);
+							
+							CUIRect Btn;
+							Row.VSplitLeft(ThumbSize + 4.0f, &Btn, &Row);
+							Btn.Margin(2.0f, &Btn);
+							
+							const bool Active = str_comp(g_Config.m_ClTrailDashSpriteName, vSprites[s].c_str()) == 0;
+							
+							// 1. Клик по кнопке
+							if(Ui()->DoButtonLogic(&s_aSpriteButtons[Group][s], 0, &Btn, BUTTONFLAG_LEFT))
+								str_copy(g_Config.m_ClTrailDashSpriteName, vSprites[s].c_str(), sizeof(g_Config.m_ClTrailDashSpriteName));
+							
+							// 2. Фон кнопки
+							if(Active)
+								Btn.Draw(ColorRGBA(0.2f, 0.6f, 1.0f, 1.0f), IGraphics::CORNER_ALL, 3.0f);
+							else
+								Btn.Draw(ColorRGBA(0.15f, 0.15f, 0.15f, 1.0f), IGraphics::CORNER_ALL, 3.0f);
+							
+							// 3. Иконка спрайта
+							IGraphics::CTextureHandle Tex = GameClient()->m_Trails.GetSpriteTexture(vSprites[s].c_str());
+							if(Tex.IsValid() && !Tex.IsNullTexture())
+							{
+								Graphics()->TextureSet(Tex);
+								Graphics()->WrapClamp();
+								Graphics()->QuadsBegin();
+								Graphics()->SetColor(1, 1, 1, 1);
+								
+								float Size = Btn.w - 6.0f;
+								IGraphics::CQuadItem QuadItem(Btn.x + Btn.w/2.0f - Size/2.0f, Btn.y + Btn.h/2.0f - Size/2.0f, Size, Size);
+								Graphics()->QuadsDrawTL(&QuadItem, 1);
+								
+								Graphics()->QuadsEnd();
+								Graphics()->WrapNormal();
+							}
+							else
+							{
+								// Если картинки нет (например, битый png) — пишем название
+								Ui()->DoLabel(&Btn, vSprites[s].c_str(), 10.0f, TEXTALIGN_MC);
+							}
+							
+							Col = (Col + 1) % SpritesPerRow;
+						}
+					}
+					else
+					{
+						Right.HSplitTop(LineSize, &Row, &Right);
+						Ui()->DoLabel(&Row, Localize("No PNG files found in trail/"), 14.0f, TEXTALIGN_ML);
+					}
+
+					// Sprite Size slider
+					Right.HSplitTop(LineSize, &Row, &Right);
+					Ui()->DoScrollbarOption(&g_Config.m_ClTrailDashSpriteSize, &g_Config.m_ClTrailDashSpriteSize, &Row, Localize("Sprite size (%)"), 10, 500);
+					// Rotate toggle
+					static CButtonContainer s_aDashRotateToggle[3];
+					Right.HSplitTop(LineSize, &Row, &Right);
+					if(DoButton_CheckBox(&s_aDashRotateToggle[Group], Localize("Rotate along direction"), g_Config.m_ClTrailDashRotate, &Row))
+						g_Config.m_ClTrailDashRotate ^= 1;
+
+					// Swing toggles
+					static CButtonContainer s_aDashSwingToggle[3];
+					Right.HSplitTop(LineSize, &Row, &Right);
+					if(DoButton_CheckBox(&s_aDashSwingToggle[Group], Localize("Swing rotation"), g_Config.m_ClTrailDashSwing, &Row))
+						g_Config.m_ClTrailDashSwing ^= 1;
+
+					if(g_Config.m_ClTrailDashSwing)
+					{
+						Right.HSplitTop(LineSize, &Row, &Right);
+						Ui()->DoScrollbarOption(&g_Config.m_ClTrailDashSwingAngle, &g_Config.m_ClTrailDashSwingAngle, &Row, Localize("Swing angle (°)"), 0, 180);
+
+						Right.HSplitTop(LineSize, &Row, &Right);
+						Ui()->DoScrollbarOption(&g_Config.m_ClTrailDashSwingSpeed, &g_Config.m_ClTrailDashSwingSpeed, &Row, Localize("Swing speed (%)"), 10, 500);
+					}
+				}
+			}
+			else
+			{
+				Right.HSplitTop(LineSize, &Row, &Right);
+				Ui()->DoScrollbarOption(aGroups[Group].m_pRibbonWidth, aGroups[Group].m_pRibbonWidth, &Row, Localize("Ribbon width"), 1, 100);
+			}
+
+			// Color mode row: Solid / Random
 			Right.HSplitTop(LineSize, &Row, &Right);
 			CUIRect ModeSolid, ModeRandom;
 			Row.VSplitMid(&ModeSolid, &ModeRandom);
@@ -588,8 +1264,44 @@ void CMenus::RenderSettingsTestClient(CUIRect MainView)
 			{
 				Right.HSplitTop(ColorPickerLineSize, nullptr, &Right);
 			}
+
+			// Spacing (per-group)
+			Right.HSplitTop(LineSize, &Row, &Right);
+			Ui()->DoScrollbarOption(aGroups[Group].m_pSpacing, aGroups[Group].m_pSpacing, &Row, Localize("Spacing"), 1, 100);
+
+			// Timing (per-group)
+			Right.HSplitTop(LineSize, &Row, &Right);
+			Ui()->DoScrollbarOption(aGroups[Group].m_pLifetime, aGroups[Group].m_pLifetime, &Row, Localize("Lifetime (ms)"), 100, 5000);
+
+			Right.HSplitTop(LineSize, &Row, &Right);
+			Ui()->DoScrollbarOption(aGroups[Group].m_pFadeTime, aGroups[Group].m_pFadeTime, &Row, Localize("Fade (ms, 0=off)"), 0, 5000);
+
+			// Fade Style
+			static CButtonContainer s_aFadeStyleBtn[3][3];
+			Right.HSplitTop(LineSize, &Row, &Right);
+			CUIRect StyleOpacity, StyleShrink, StyleEase;
+			Row.VSplitLeft(Row.w / 3.0f, &StyleOpacity, &Row);
+			Row.VSplitLeft(Row.w / 2.0f, &StyleShrink, &StyleEase);
+			if(DoButton_CheckBox(&s_aFadeStyleBtn[Group][0], Localize("Opacity"), *aGroups[Group].m_pFadeStyle == 0, &StyleOpacity)) *aGroups[Group].m_pFadeStyle = 0;
+			if(DoButton_CheckBox(&s_aFadeStyleBtn[Group][1], Localize("Bounce"), *aGroups[Group].m_pFadeStyle == 1, &StyleShrink)) *aGroups[Group].m_pFadeStyle = 1;
+			if(DoButton_CheckBox(&s_aFadeStyleBtn[Group][2], Localize("Ease-Out"), *aGroups[Group].m_pFadeStyle == 2, &StyleEase)) *aGroups[Group].m_pFadeStyle = 2;
+
+			Right.HSplitTop(LineSize, &Row, &Right);
+			Ui()->DoScrollbarOption(aGroups[Group].m_pNarrowTime, aGroups[Group].m_pNarrowTime, &Row, Localize("Narrow (ms)"), 0, 2000);
+
+			// Preview strip
+			Right.HSplitTop(MarginSmall, nullptr, &Right);
+			CUIRect PreviewRect;
+			Right.HSplitTop(100.0f, &PreviewRect, &Right);
+			DrawTrailPreview(PreviewRect, Group);
 		}
 
+		CUIRect UsedRect = MainView;
+		UsedRect.y = StartY;
+		UsedRect.h = std::max(Left.y, Right.y) - StartY + 10.0f;
+		s_TrailScrollRegion.AddRect(UsedRect);
+
+		s_TrailScrollRegion.End();
 		return;
 	}
 	// ***** Weather tab ***** //
@@ -602,6 +1314,12 @@ void CMenus::RenderSettingsTestClient(CUIRect MainView)
 		const float HeadlineFontSize = 20.0f;
 		const float HeadlineHeight = 30.0f;
 		const float MarginSmall = 5.0f;
+
+		static CScrollRegion s_WeatherScrollRegion;
+		CScrollRegionParams WeatherScrollParams;
+		WeatherScrollParams.m_ScrollUnit = 60.0f;
+		s_WeatherScrollRegion.Begin(&MainView, &WeatherScrollParams);
+		const float StartY = MainView.y;
 
 		CUIRect Left, Button;
 		MainView.VSplitMid(&Left, nullptr, 20.0f);
@@ -633,6 +1351,12 @@ void CMenus::RenderSettingsTestClient(CUIRect MainView)
 			&Left, Localize("Snowflake color"), &g_Config.m_ClWeatherSnowColor,
 			ColorRGBA(1.0f, 1.0f, 1.0f, 1.0f), false, nullptr, true);
 
+		CUIRect UsedRect = MainView;
+		UsedRect.y = StartY;
+		UsedRect.h = Left.y - StartY + 10.0f;
+		s_WeatherScrollRegion.AddRect(UsedRect);
+
+		s_WeatherScrollRegion.End();
 		return;
 	}
 

@@ -582,6 +582,9 @@ protected:
 	// found in menus_settings_ddnet.cpp
 	void RenderSettingsDDNet(CUIRect MainView);
 	void RenderSettingsTestClient(CUIRect MainView);
+	void ResetTestClientSettings();
+	void DrawNameGradientPreview(CUIRect Rect, unsigned int Color1, unsigned int Color2, unsigned int Color3, bool Wave);
+	void DrawTrailPreview(CUIRect Rect, int Group);
 
 	// found in menus_settings_general.cpp
 	void RenderSettingsGeneral(CUIRect MainView);

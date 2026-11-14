@@ -255,6 +255,7 @@ public:
 		TEXLOAD_TO_3D_TEXTURE = 1 << 0,
 		TEXLOAD_TO_2D_ARRAY_TEXTURE = 1 << 1,
 		TEXLOAD_NO_2D_TEXTURE = 1 << 2,
+		TEXLOAD_NEAREST_FILTER = 1 << 3, // для пиксельной графики
 	};
 
 	class CTextureHandle
