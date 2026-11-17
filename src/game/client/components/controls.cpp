@@ -6,7 +6,8 @@
 #include <base/mem.h>
 #include <base/time.h>
 #include <base/vmath.h>
-
+#include <base/math.h>
+#include <cmath>
 #include <engine/client.h>
 #include <engine/shared/config.h>
 
@@ -21,6 +22,48 @@
 #include <game/localization.h>
 
 #include <algorithm>
+
+// Direction rotation: rotate the aiming vector that is sent to the server.
+// The visual cursor (m_aMousePos / m_aTargetPos) is NOT rotated, so the
+// crosshair stays under the physical mouse position, but the hook and
+// bullets will fly along the rotated angle.
+static bool ShouldRotateInputForConn(int Conn)
+{
+	if(!g_Config.m_ClDirRotation)
+		return false;
+	if(Conn == IClient::CONN_MAIN)
+		return g_Config.m_ClDirRotationOwn != 0;
+	if(Conn == IClient::CONN_DUMMY)
+		return g_Config.m_ClDirRotationDummy != 0;
+	return g_Config.m_ClDirRotationExtra != 0;
+}
+
+// Replace the aim direction of the input with an independent spin angle.
+// The crosshair (MousePos) is ignored for the angle, but its length is
+// preserved so the server-side physics sees a valid magnitude.
+// When fire or hook is pressed, the input is left untouched so the shot
+// lands exactly under the crosshair.
+static void ApplySpin(CNetObj_PlayerInput *pInput, const CNetObj_PlayerInput *pLastInput, int Slot, const vec2 &MousePos, float SpinAngle)
+{
+	if(!ShouldRotateInputForConn(Slot))
+		return;
+
+	// Edge detection: only skip spin on the tick when fire/hook is FIRST
+	// pressed. A single shot / hook goes straight to the crosshair, then
+	// the tee spins freely again, even while the button is still held
+	// (so e.g. held laser or held hook no longer locks the aim direction).
+	const bool FireJustPressed = (pInput->m_Fire & 1) != 0 && (pLastInput->m_Fire & 1) == 0;
+	const bool HookJustPressed = pInput->m_Hook != 0 && pLastInput->m_Hook == 0;
+	if(FireJustPressed || HookJustPressed)
+		return;
+
+	const float Len = std::max(length(MousePos), 1.0f);
+	pInput->m_TargetX = round_to_int(cosf(SpinAngle) * Len);
+	pInput->m_TargetY = round_to_int(sinf(SpinAngle) * Len);
+	if(!pInput->m_TargetX && !pInput->m_TargetY)
+		pInput->m_TargetX = 1;
+}
+
 int CControls::ActiveSlot() const
 {
 	// Extra-слот только если extra реально онлайн и мы им управляем.
@@ -283,6 +326,7 @@ int CControls::SnapInput(int *pData, int Slot)
 		m_ForceSnapInput = false;
 		m_aInputData[Slot].m_TargetX = (int)m_aMousePos[Slot].x;
 		m_aInputData[Slot].m_TargetY = (int)m_aMousePos[Slot].y;
+		ApplySpin(&m_aInputData[Slot], &m_aLastData[Slot], Slot, m_aMousePos[Slot], GameClient()->m_Players.GetDirectionRotationOffset());
 		mem_copy(pData, &m_aInputData[Slot], sizeof(CNetObj_PlayerInput));
 		return sizeof(CNetObj_PlayerInput);
 	}
@@ -433,6 +477,10 @@ int CControls::SnapInput(int *pData, int Slot)
 			m_aInputData[Slot].m_TargetY = (int)(std::cos(t * 3) * 100.0f);
 		}
 
+		// Direction rotation: replace the aim with an independent spin angle
+		// while fire and hook are released. When either is pressed, the input
+		// is left untouched so the shot/hook lands under the crosshair.
+		ApplySpin(&m_aInputData[Slot], &m_aLastData[Slot], Slot, m_aMousePos[Slot], GameClient()->m_Players.GetDirectionRotationOffset());
 		// check if we need to send input
 		Send = Send || m_aInputData[Slot].m_Direction != m_aLastData[Slot].m_Direction;
 		Send = Send || m_aInputData[Slot].m_Jump != m_aLastData[Slot].m_Jump;

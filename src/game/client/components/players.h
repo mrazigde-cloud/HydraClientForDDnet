@@ -52,6 +52,11 @@ public:
 		int ClientId,
 		float Intra = 0.0f);
 
+	bool ShouldRotateTee(int ClientId) const;
+	float GetTeeRotationOffset() const;
+	bool ShouldRotateDirection(int ClientId) const;
+	float GetDirectionRotationOffset() const;
+
 	int Sizeof() const override { return sizeof(*this); }
 	void OnInit() override;
 	void OnRender() override;

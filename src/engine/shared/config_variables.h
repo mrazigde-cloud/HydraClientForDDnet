@@ -55,6 +55,7 @@ MACRO_CONFIG_COL(ClNameGradientColor3, cl_name_gradient_color3, 11206528, CFGFLA
 MACRO_CONFIG_INT(ClTrail, cl_trail, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Enable player trails")
 MACRO_CONFIG_INT(ClTrailDashSprite, cl_trail_dash_sprite, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dash trail: use sprite instead of solid rect")
 MACRO_CONFIG_STR(ClTrailDashSpriteName, cl_trail_dash_sprite_name, 64, "trail_dash", CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dash trail sprite name (without .png, looks in trail/)")
+MACRO_CONFIG_INT(ClTrailDashSpriteMode, cl_trail_dash_sprite_mode, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dash trail: sprite mode (0 = selected, 1 = cycle from folder)")
 MACRO_CONFIG_INT(ClTrailDashSpriteSize, cl_trail_dash_sprite_size, 100, 10, 500, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dash trail sprite size (percent)")
 MACRO_CONFIG_INT(ClTrailDashRotate, cl_trail_dash_rotate, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dash trail: rotate sprite along movement direction")
 MACRO_CONFIG_INT(ClTrailDashSwing, cl_trail_dash_swing, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dash trail: swing rotation")
@@ -467,6 +468,24 @@ MACRO_CONFIG_STR(ClAssetHud, cl_asset_hud, 50, "default", CFGFLAG_SAVE | CFGFLAG
 MACRO_CONFIG_STR(ClAssetExtras, cl_asset_extras, 50, "default", CFGFLAG_SAVE | CFGFLAG_CLIENT, "The asset for the game graphics that do not come from Teeworlds")
 MACRO_CONFIG_INT(ClExtraAutoSwitch, cl_extra_auto_switch, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Auto switch control to extra on connect");
 
+// Tee rotation
+MACRO_CONFIG_INT(ClTeeRotation, cl_tee_rotation, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Enable tee rotation effect")
+MACRO_CONFIG_INT(ClTeeRotationMode, cl_tee_rotation_mode, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Tee rotation mode (0 = linear, 1 = swing)")
+MACRO_CONFIG_INT(ClTeeRotationSpeed, cl_tee_rotation_speed, 100, 1, 500, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Tee rotation speed (percent)")
+MACRO_CONFIG_INT(ClTeeRotationSwingAngle, cl_tee_rotation_swing_angle, 45, 0, 180, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Tee rotation swing angle in degrees (swing mode)")
+MACRO_CONFIG_INT(ClTeeRotationOwn, cl_tee_rotation_own, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Rotate own (main) tee")
+MACRO_CONFIG_INT(ClTeeRotationDummy, cl_tee_rotation_dummy, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Rotate dummy tee")
+MACRO_CONFIG_INT(ClTeeRotationExtra, cl_tee_rotation_extra, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Rotate extra tees")
+MACRO_CONFIG_INT(ClTeeRotationOthers, cl_tee_rotation_others, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Rotate other players' tees")
+// Direction rotation
+MACRO_CONFIG_INT(ClDirRotation, cl_dir_rotation, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Enable visual aiming direction rotation")
+MACRO_CONFIG_INT(ClDirRotationMode, cl_dir_rotation_mode, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Direction rotation mode (0 = linear, 1 = swing)")
+MACRO_CONFIG_INT(ClDirRotationSpeed, cl_dir_rotation_speed, 100, 1, 500, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Direction rotation speed (percent)")
+MACRO_CONFIG_INT(ClDirRotationSwingAngle, cl_dir_rotation_swing_angle, 45, 0, 180, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Direction rotation swing angle in degrees (swing mode)")
+MACRO_CONFIG_INT(ClDirRotationOwn, cl_dir_rotation_own, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Rotate own (main) direction")
+MACRO_CONFIG_INT(ClDirRotationDummy, cl_dir_rotation_dummy, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Rotate dummy direction")
+MACRO_CONFIG_INT(ClDirRotationExtra, cl_dir_rotation_extra, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Rotate extra directions")
+MACRO_CONFIG_INT(ClDirRotationOthers, cl_dir_rotation_others, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Rotate other players' directions")
 MACRO_CONFIG_STR(BrFilterString, br_filter_string, 128, "Novice", CFGFLAG_SAVE | CFGFLAG_CLIENT, "Server browser filtering string")
 MACRO_CONFIG_STR(BrExcludeString, br_exclude_string, 128, "", CFGFLAG_SAVE | CFGFLAG_CLIENT, "Server browser exclusion string")
 MACRO_CONFIG_INT(BrFilterFull, br_filter_full, 0, 0, 1, CFGFLAG_SAVE | CFGFLAG_CLIENT, "Filter out full server in browser")

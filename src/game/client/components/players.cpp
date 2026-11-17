@@ -2,10 +2,10 @@
 /* If you are missing that file, acquire a complete release at teeworlds.com.                */
 
 #include "players.h"
-
 #include <base/color.h>
 #include <base/dbg.h>
 #include <base/math.h>
+#include <base/time.h>
 
 #include <engine/client/enums.h>
 #include <engine/demo.h>
@@ -27,6 +27,65 @@
 #include <game/gamecore.h>
 #include <game/mapitems.h>
 
+bool CPlayers::ShouldRotateTee(int ClientId) const
+{
+	if(!g_Config.m_ClTeeRotation || ClientId < 0 || ClientId >= MAX_CLIENTS)
+		return false;
+
+	if(!GameClient()->IsCopyAllOwnTee(ClientId))
+		return g_Config.m_ClTeeRotationOthers != 0;
+
+	if(ClientId == GameClient()->m_aLocalIds[0])
+		return g_Config.m_ClTeeRotationOwn != 0;
+	if(ClientId == GameClient()->m_aLocalIds[1])
+		return g_Config.m_ClTeeRotationDummy != 0;
+
+	return g_Config.m_ClTeeRotationExtra != 0;
+}
+
+float CPlayers::GetTeeRotationOffset() const
+{
+	static const int64_t s_StartTime = time();
+	const float Freq = (float)time_freq();
+	const float T = (float)(time() - s_StartTime) / Freq;
+	const float SpeedMultiplier = (float)g_Config.m_ClTeeRotationSpeed / 100.0f;
+
+	if(g_Config.m_ClTeeRotationMode == 0)
+		return fmodf(T * SpeedMultiplier * 2.0f * pi, 2.0f * pi);
+
+	const float MaxAngle = (float)g_Config.m_ClTeeRotationSwingAngle * (pi / 180.0f);
+	return sinf(T * SpeedMultiplier * 4.0f) * MaxAngle;
+}
+bool CPlayers::ShouldRotateDirection(int ClientId) const
+{
+	if(!g_Config.m_ClDirRotation || ClientId < 0 || ClientId >= MAX_CLIENTS)
+		return false;
+
+	// Проверяем по реальным local ids, без IsCopyAllOwnTee —
+	// эта функция зависит от флага копирования движений и может
+	// возвращать false, даже если ClientId — наш main/dummy/extra.
+	if(ClientId == GameClient()->m_aLocalIds[0])
+		return g_Config.m_ClDirRotationOwn != 0;
+	if(ClientId == GameClient()->m_aLocalIds[1])
+		return g_Config.m_ClDirRotationDummy != 0;
+	if(ClientId == Client()->GetExtraClientId())
+		return g_Config.m_ClDirRotationExtra != 0;
+	return false;
+}
+
+float CPlayers::GetDirectionRotationOffset() const
+{
+	static const int64_t s_StartTime = time();
+	const float Freq = (float)time_freq();
+	const float T = (float)(time() - s_StartTime) / Freq;
+	const float SpeedMultiplier = (float)g_Config.m_ClDirRotationSpeed / 100.0f;
+
+	if(g_Config.m_ClDirRotationMode == 0)
+		return fmodf(T * SpeedMultiplier * 2.0f * pi, 2.0f * pi);
+
+	const float MaxAngle = (float)g_Config.m_ClDirRotationSwingAngle * (pi / 180.0f);
+	return sinf(T * SpeedMultiplier * 4.0f) * MaxAngle;
+}
 static float CalculateHandAngle(vec2 Dir, float AngleOffset)
 {
 	const float Angle = angle(Dir);
@@ -100,12 +159,55 @@ float CPlayers::GetPlayerTargetAngle(
 	int ClientId,
 	float Intra)
 {
-	// CopyAll: все свои тии (main/dummy/extra1/extra2) смотрят туда же, куда живой курсор активного соединения
+	// Local player (main / dummy / extra): read the angle from the input that
+	// is actually sent to the server, so the rendered direction matches the
+	// server-side aim. m_aInputData already contains the direction rotation
+	// offset applied in CControls::SnapInput, so no extra += needed here.
+	if(ClientId >= 0 && ClientId == GameClient()->m_Snap.m_LocalClientId &&
+		!GameClient()->m_Snap.m_SpecInfo.m_Active && Client()->State() != IClient::STATE_DEMOPLAYBACK)
+	{
+		// Map ClientId to the slot whose input we actually sent, so the
+		// rendered angle matches the server-side aim for this specific tee.
+		int Slot = -1;
+		if(ClientId == GameClient()->m_aLocalIds[0])
+			Slot = IClient::CONN_MAIN;
+		else if(ClientId == GameClient()->m_aLocalIds[1])
+			Slot = IClient::CONN_DUMMY;
+		else if(ClientId == Client()->GetExtraClientId())
+			Slot = GameClient()->m_Controls.ActiveSlot();
+		if(Slot < 0)
+			Slot = GameClient()->m_Controls.ActiveSlot();
+
+		const CNetObj_PlayerInput &Inp = GameClient()->m_Controls.m_aInputData[Slot];
+		const bool Pressed = (Inp.m_Fire & 1) || Inp.m_Hook;
+
+		// While fire / hook are released, recompute the spin angle in real
+		// time so the render stays smooth even between input ticks.
+		if(ShouldRotateDirection(ClientId) && !Pressed)
+			return GetDirectionRotationOffset();
+
+		vec2 Direction = normalize(vec2(Inp.m_TargetX, Inp.m_TargetY));
+		if(Direction == vec2(0.0f, 0.0f))
+			Direction = vec2(1.0f, 0.0f);
+		return angle(Direction);
+	}
+
+	// Copy moves: use the live cursor angle of the active slot (input already
+	// rotated in SnapInput, but that slot may differ from the one being
+	// rendered, so re-use the same m_aInputData for consistency).
 	if(g_Config.m_ClDummyCopyMoves && ClientId >= 0 && GameClient()->IsCopyAllOwnTee(ClientId) &&
 		!GameClient()->m_Snap.m_SpecInfo.m_Active && Client()->State() != IClient::STATE_DEMOPLAYBACK)
 	{
-const int MouseSlot = GameClient()->m_Controls.ActiveSlot();
-		vec2 Direction = normalize(vec2((int)GameClient()->m_Controls.m_aMousePos[MouseSlot].x, (int)GameClient()->m_Controls.m_aMousePos[MouseSlot].y));
+		const int Slot = GameClient()->m_Controls.ActiveSlot();
+		const CNetObj_PlayerInput &Inp = GameClient()->m_Controls.m_aInputData[Slot];
+		const bool Pressed = (Inp.m_Fire & 1) || Inp.m_Hook;
+
+		// While fire / hook are released, recompute the spin angle in real
+		// time so the render stays smooth even between input ticks.
+		if(ShouldRotateDirection(ClientId) && !Pressed)
+			return GetDirectionRotationOffset();
+
+		vec2 Direction = normalize(vec2(Inp.m_TargetX, Inp.m_TargetY));
 		if(Direction == vec2(0.0f, 0.0f))
 			Direction = vec2(1.0f, 0.0f);
 		return angle(Direction);
@@ -115,21 +217,6 @@ const int MouseSlot = GameClient()->m_Controls.ActiveSlot();
 	{
 		const CNetObj_PlayerInput &Input = g_Config.m_ClDummyHammer ? GameClient()->m_HammerInput : GameClient()->m_DummyInput;
 		return angle(vec2(Input.m_TargetX, Input.m_TargetY));
-	}
-
-	// with dummy copy, use the same angle as local player
-	if((GameClient()->m_Snap.m_LocalClientId == ClientId || (GameClient()->PredictDummy() && g_Config.m_ClDummyCopyMoves && GameClient()->m_aLocalIds[!g_Config.m_ClDummy] == ClientId)) &&
-		!GameClient()->m_Snap.m_SpecInfo.m_Active && Client()->State() != IClient::STATE_DEMOPLAYBACK)
-	{
-		// calculate what would be sent to the server from our current input
-		const int MouseSlot = GameClient()->m_Controls.ActiveSlot();
-		vec2 Direction = normalize(vec2((int)GameClient()->m_Controls.m_aMousePos[MouseSlot].x, (int)GameClient()->m_Controls.m_aMousePos[MouseSlot].y));
-
-		// fix direction if mouse is exactly in the center
-		if(Direction == vec2(0.0f, 0.0f))
-			Direction = vec2(1.0f, 0.0f);
-
-		return angle(Direction);
 	}
 
 	// using unpredicted angle when rendering other players in-game
@@ -153,24 +240,14 @@ const int MouseSlot = GameClient()->m_Controls.ActiveSlot();
 	}
 	else
 	{
-		// If the player moves their weapon through top, then change
-		// the end angle by 2*Pi, so that the mix function will use the
-		// short path and not the long one.
 		if(pPlayerChar->m_Angle > (256.0f * pi) && pPrevChar->m_Angle < 0)
-		{
 			return mix((float)pPrevChar->m_Angle, (float)(pPlayerChar->m_Angle - 256.0f * 2 * pi), Intra) / 256.0f;
-		}
 		else if(pPlayerChar->m_Angle < 0 && pPrevChar->m_Angle > (256.0f * pi))
-		{
 			return mix((float)pPrevChar->m_Angle, (float)(pPlayerChar->m_Angle + 256.0f * 2 * pi), Intra) / 256.0f;
-		}
 		else
-		{
 			return mix((float)pPrevChar->m_Angle, (float)pPlayerChar->m_Angle, Intra) / 256.0f;
-		}
 	}
 }
-
 void CPlayers::RenderHookCollLine(
 	const CScreenRect &ScreenRect,
 	const CNetObj_Character *pPrevChar,
@@ -644,7 +721,9 @@ void CPlayers::RenderPlayer(
 		LastAttackTime = (s_LastPredIntraTick + (Client()->PredGameTick(g_Config.m_ClDummy) - 1 - Player.m_AttackTick)) / (float)Client()->GameTickSpeed();
 	}
 	float AttackTicksPassed = AttackTime * (float)Client()->GameTickSpeed();
-
+	// Direction rotation is applied inside GetPlayerTargetAngle() for local
+	// connections and comes back from the server for everyone else. Do NOT
+	// add the offset again here, or the tee would rotate twice.
 	float Angle = GetPlayerTargetAngle(&Prev, &Player, ClientId, Intra);
 
 	vec2 Direction = direction(Angle);
@@ -885,11 +964,12 @@ void CPlayers::RenderPlayer(
 				vec2(GameClient()->m_Snap.m_aCharacters[ClientId].m_Cur.m_X, GameClient()->m_Snap.m_aCharacters[ClientId].m_Cur.m_Y),
 				Client()->IntraGameTick(g_Config.m_ClDummy));
 
-		RenderTools()->RenderTee(&State, &RenderInfo, Player.m_Emote, Direction, ShadowPosition, g_Config.m_ClUnpredictedShadowAlpha / 100.f); // render ghost
+		const float TeeRotationOffset = ShouldRotateTee(ClientId) ? GetTeeRotationOffset() : 0.0f;
+		RenderTools()->RenderTee(&State, &RenderInfo, Player.m_Emote, Direction, ShadowPosition, g_Config.m_ClUnpredictedShadowAlpha / 100.f, TeeRotationOffset); // render ghost
 	}
 
-	RenderTools()->RenderTee(&State, &RenderInfo, Player.m_Emote, Direction, Position, Alpha);
-
+	const float TeeRotationOffset = ShouldRotateTee(ClientId) ? GetTeeRotationOffset() : 0.0f;
+	RenderTools()->RenderTee(&State, &RenderInfo, Player.m_Emote, Direction, Position, Alpha, TeeRotationOffset);
 	float TeeAnimScale, TeeBaseSize;
 	CRenderTools::GetRenderTeeAnimScaleAndBaseSize(&RenderInfo, TeeAnimScale, TeeBaseSize);
 	vec2 BodyPos = Position + vec2(State.GetBody()->m_X, State.GetBody()->m_Y) * TeeAnimScale;

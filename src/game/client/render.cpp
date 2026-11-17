@@ -253,12 +253,12 @@ void CRenderTools::GetRenderTeeOffsetToRenderedTee(const CAnimState *pAnim, cons
 	TeeOffsetToMid.y = -MidOfRendered;
 }
 
-void CRenderTools::RenderTee(const CAnimState *pAnim, const CTeeRenderInfo *pInfo, int Emote, vec2 Dir, vec2 Pos, float Alpha) const
+void CRenderTools::RenderTee(const CAnimState *pAnim, const CTeeRenderInfo *pInfo, int Emote, vec2 Dir, vec2 Pos, float Alpha, float RotationOffset) const
 {
 	if(pInfo->m_aSixup[g_Config.m_ClDummy].PartTexture(protocol7::SKINPART_BODY).IsValid())
-		RenderTee7(pAnim, pInfo, Emote, Dir, Pos, Alpha);
+		RenderTee7(pAnim, pInfo, Emote, Dir, Pos, Alpha, RotationOffset);
 	else
-		RenderTee6(pAnim, pInfo, Emote, Dir, Pos, Alpha);
+		RenderTee6(pAnim, pInfo, Emote, Dir, Pos, Alpha, RotationOffset);
 
 	Graphics()->SetColor(1.f, 1.f, 1.f, 1.f);
 	Graphics()->QuadsSetRotation(0);
@@ -272,7 +272,7 @@ void CRenderTools::RenderIdleTeeAtCenter(const CTeeRenderInfo *pInfo, vec2 Cente
 	RenderTee(pIdleState, pInfo, Emote, Dir, Center + vec2(0.0f, OffsetToMid.y), Alpha);
 }
 
-void CRenderTools::RenderTee7(const CAnimState *pAnim, const CTeeRenderInfo *pInfo, int Emote, vec2 Dir, vec2 Pos, float Alpha) const
+void CRenderTools::RenderTee7(const CAnimState *pAnim, const CTeeRenderInfo *pInfo, int Emote, vec2 Dir, vec2 Pos, float Alpha, float RotationOffset) const
 {
 	vec2 Direction = Dir;
 	vec2 Position = Pos;
@@ -327,7 +327,7 @@ void CRenderTools::RenderTee7(const CAnimState *pAnim, const CTeeRenderInfo *pIn
 				{
 					Graphics()->TextureSet(DecorationTexture);
 					Graphics()->QuadsBegin();
-					Graphics()->QuadsSetRotation(pAnim->GetBody()->m_Angle * pi * 2);
+					Graphics()->QuadsSetRotation(pAnim->GetBody()->m_Angle * pi * 2 + RotationOffset);
 					Graphics()->SetColor(pInfo->m_aSixup[g_Config.m_ClDummy].m_aColors[protocol7::SKINPART_DECORATION].WithAlpha(Alpha));
 					Graphics()->SelectSprite7(OutLine ? client_data7::SPRITE_TEE_DECORATION_OUTLINE : client_data7::SPRITE_TEE_DECORATION);
 					Item = BodyItem;
@@ -339,7 +339,7 @@ void CRenderTools::RenderTee7(const CAnimState *pAnim, const CTeeRenderInfo *pIn
 				const IGraphics::CTextureHandle &BodyTexture = pInfo->m_aSixup[g_Config.m_ClDummy].PartTexture(protocol7::SKINPART_BODY);
 				Graphics()->TextureSet(BodyTexture);
 				Graphics()->QuadsBegin();
-				Graphics()->QuadsSetRotation(pAnim->GetBody()->m_Angle * pi * 2);
+				Graphics()->QuadsSetRotation(pAnim->GetBody()->m_Angle * pi * 2 + RotationOffset);
 				if(OutLine)
 				{
 					Graphics()->SetColor(1.0f, 1.0f, 1.0f, Alpha);
@@ -360,7 +360,7 @@ void CRenderTools::RenderTee7(const CAnimState *pAnim, const CTeeRenderInfo *pIn
 				{
 					Graphics()->TextureSet(MarkingTexture);
 					Graphics()->QuadsBegin();
-					Graphics()->QuadsSetRotation(pAnim->GetBody()->m_Angle * pi * 2);
+					Graphics()->QuadsSetRotation(pAnim->GetBody()->m_Angle * pi * 2 + RotationOffset);
 					ColorRGBA MarkingColor = pInfo->m_aSixup[g_Config.m_ClDummy].m_aColors[protocol7::SKINPART_MARKING];
 					Graphics()->SetColor(MarkingColor.r * MarkingColor.a, MarkingColor.g * MarkingColor.a, MarkingColor.b * MarkingColor.a, MarkingColor.a * Alpha);
 					Graphics()->SelectSprite7(client_data7::SPRITE_TEE_MARKING);
@@ -374,7 +374,7 @@ void CRenderTools::RenderTee7(const CAnimState *pAnim, const CTeeRenderInfo *pIn
 				{
 					Graphics()->TextureSet(BodyTexture);
 					Graphics()->QuadsBegin();
-					Graphics()->QuadsSetRotation(pAnim->GetBody()->m_Angle * pi * 2);
+					Graphics()->QuadsSetRotation(pAnim->GetBody()->m_Angle * pi * 2 + RotationOffset);
 					Graphics()->SetColor(1.0f, 1.0f, 1.0f, Alpha);
 					for(int t = 0; t < 2; t++)
 					{
@@ -388,7 +388,7 @@ void CRenderTools::RenderTee7(const CAnimState *pAnim, const CTeeRenderInfo *pIn
 				// draw eyes
 				Graphics()->TextureSet(pInfo->m_aSixup[g_Config.m_ClDummy].PartTexture(protocol7::SKINPART_EYES));
 				Graphics()->QuadsBegin();
-				Graphics()->QuadsSetRotation(pAnim->GetBody()->m_Angle * pi * 2);
+				Graphics()->QuadsSetRotation(pAnim->GetBody()->m_Angle * pi * 2 + RotationOffset);
 				if(IsBot)
 				{
 					Graphics()->SetColor(pInfo->m_aSixup[g_Config.m_ClDummy].m_BotColor.WithAlpha(Alpha));
@@ -432,7 +432,7 @@ void CRenderTools::RenderTee7(const CAnimState *pAnim, const CTeeRenderInfo *pIn
 				{
 					Graphics()->TextureSet(pInfo->m_aSixup[g_Config.m_ClDummy].m_HatTexture);
 					Graphics()->QuadsBegin();
-					Graphics()->QuadsSetRotation(pAnim->GetBody()->m_Angle * pi * 2);
+					Graphics()->QuadsSetRotation(pAnim->GetBody()->m_Angle * pi * 2 + RotationOffset);
 					Graphics()->SetColor(1.0f, 1.0f, 1.0f, Alpha);
 					int Flag = Direction.x < 0.0f ? IGraphics::SPRITE_FLAG_FLIP_X : 0;
 					switch(pInfo->m_aSixup[g_Config.m_ClDummy].m_HatSpriteIndex)
@@ -491,7 +491,7 @@ void CRenderTools::RenderTee7(const CAnimState *pAnim, const CTeeRenderInfo *pIn
 	}
 }
 
-void CRenderTools::RenderTee6(const CAnimState *pAnim, const CTeeRenderInfo *pInfo, int Emote, vec2 Dir, vec2 Pos, float Alpha) const
+void CRenderTools::RenderTee6(const CAnimState *pAnim, const CTeeRenderInfo *pInfo, int Emote, vec2 Dir, vec2 Pos, float Alpha, float RotationOffset) const
 {
 	vec2 Direction = Dir;
 	vec2 Position = Pos;
@@ -510,7 +510,7 @@ void CRenderTools::RenderTee6(const CAnimState *pAnim, const CTeeRenderInfo *pIn
 			GetRenderTeeAnimScaleAndBaseSize(pInfo, AnimScale, BaseSize);
 			if(Filling == 1)
 			{
-				Graphics()->QuadsSetRotation(pAnim->GetBody()->m_Angle * pi * 2);
+				Graphics()->QuadsSetRotation(pAnim->GetBody()->m_Angle * pi * 2 + RotationOffset);
 
 				// draw body
 				Graphics()->SetColor(pInfo->m_ColorBody.r, pInfo->m_ColorBody.g, pInfo->m_ColorBody.b, Alpha);

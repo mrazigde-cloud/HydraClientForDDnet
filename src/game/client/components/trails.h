@@ -42,6 +42,7 @@ private:
 		int64_t m_Time;
 		vec2 m_Perp; // perpendicular to m_Dir, used by ribbon style
 		uint32_t m_Id; // used by neon style for wave/noise pattern
+		int m_SpriteIndex = -1; // used by dash style in cycle mode
 	};
 
 	std::deque<STrailPoint> m_aTrailPoints[MAX_CLIENTS];

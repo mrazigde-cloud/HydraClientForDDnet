@@ -524,6 +524,25 @@ void CMenus::ResetTestClientSettings()
 
 	// ---- Extra ----
 	g_Config.m_ClExtraAutoSwitch = 1;
+	// ---- Tee rotation ----
+	g_Config.m_ClTeeRotation = 0;
+	g_Config.m_ClTeeRotationMode = 0;
+	g_Config.m_ClTeeRotationSpeed = 100;
+	g_Config.m_ClTeeRotationSwingAngle = 45;
+	g_Config.m_ClTeeRotationOwn = 1;
+	g_Config.m_ClTeeRotationDummy = 1;
+	g_Config.m_ClTeeRotationExtra = 1;
+	g_Config.m_ClTeeRotationOthers = 1;
+
+	// ---- Direction rotation ----
+	g_Config.m_ClDirRotation = 0;
+	g_Config.m_ClDirRotationMode = 0;
+	g_Config.m_ClDirRotationSpeed = 100;
+	g_Config.m_ClDirRotationSwingAngle = 45;
+	g_Config.m_ClDirRotationOwn = 1;
+	g_Config.m_ClDirRotationDummy = 1;
+	g_Config.m_ClDirRotationExtra = 1;
+	g_Config.m_ClDirRotationOthers = 1;
 }
 
 void CMenus::DrawNameGradientPreview(CUIRect Rect, unsigned int Color1, unsigned int Color2, unsigned int Color3, bool Wave)
@@ -742,17 +761,17 @@ void CMenus::DrawTrailPreview(CUIRect Rect, int Group)
 
 	if(Style == 0) // Dashes
 	{
-		const auto Tex = GameClient()->m_Trails.GetDashTrailTexture();
-		const bool HasSprite = g_Config.m_ClTrailDashSprite != 0 && Tex.IsValid() && !Tex.IsNullTexture();
+		const auto &vSprites = GameClient()->m_Trails.GetAvailableSprites();
+		const bool HasSprite = g_Config.m_ClTrailDashSprite != 0 && !vSprites.empty();
+		const bool IsCycle = HasSprite && g_Config.m_ClTrailDashSpriteMode == 1;
 		const float SpriteSizeMult = HasSprite ? (g_Config.m_ClTrailDashSpriteSize / 100.0f) : 1.0f;
 		
 		Graphics()->BlendNormal();
-		if(HasSprite)
-		{
-			Graphics()->TextureSet(Tex);
-			Graphics()->WrapClamp();
-		}
+		if(!HasSprite)
+			Graphics()->TextureClear();
 		Graphics()->QuadsBegin();
+
+		IGraphics::CTextureHandle LastTex = IGraphics::CTextureHandle();
 
 		for(const auto &pt : vPoints)
 		{
@@ -769,8 +788,46 @@ void CMenus::DrawTrailPreview(CUIRect Rect, int Group)
 			float Rot = 0.0f;
 			if(!HasSprite || g_Config.m_ClTrailDashRotate)
 				Rot = atan2f(pt.m_Dir.y, pt.m_Dir.x);
+
+			// Swing в превью
+			if(HasSprite && g_Config.m_ClTrailDashSwing)
+			{
+				const float Speed = (float)g_Config.m_ClTrailDashSwingSpeed / 100.0f;
+				const float MaxAngle = (float)g_Config.m_ClTrailDashSwingAngle * (pi / 180.0f);
+				const float Phase = (float)pt.m_Id * 0.5f;
+				Rot += sinf(T * 4.0f * Speed + Phase) * MaxAngle;
+			}
+
 			Graphics()->QuadsSetRotation(Rot);
-			
+
+			if(HasSprite)
+			{
+				IGraphics::CTextureHandle Tex;
+				if(IsCycle)
+				{
+					int SpriteIdx = pt.m_Id % (int)vSprites.size();
+					Tex = GameClient()->m_Trails.GetSpriteTexture(vSprites[SpriteIdx].c_str());
+				}
+				else
+				{
+					Tex = GameClient()->m_Trails.GetSpriteTexture(g_Config.m_ClTrailDashSpriteName);
+				}
+
+				if(Tex.IsValid() && !Tex.IsNullTexture())
+				{
+					if(!LastTex.IsValid() || LastTex.Id() != Tex.Id())
+					{
+						Graphics()->QuadsEnd();
+						Graphics()->TextureSet(Tex);
+						Graphics()->WrapClamp();
+						Graphics()->QuadsBegin();
+						Graphics()->SetColor(Color); // <-- Восстанавливаем цвет
+						Graphics()->QuadsSetRotation(Rot); // <-- Восстанавливаем поворот
+						LastTex = Tex;
+					}
+				}
+			}
+
 			const float DashLen = HasSprite ? W : W * 2.0f;
 			IGraphics::CQuadItem Item(pt.m_Pos.x - DashLen * 0.5f, pt.m_Pos.y - W * 0.5f, DashLen, W);
 			Graphics()->QuadsDrawTL(&Item, 1);
@@ -901,7 +958,9 @@ void CMenus::RenderSettingsTestClient(CUIRect MainView)
 		TESTCLIENT_TAB_NAME_GRADIENT = 1,
 		TESTCLIENT_TAB_TRAIL = 2,
 		TESTCLIENT_TAB_WEATHER = 3,
-		NUMBER_OF_TESTCLIENT_TABS = 4,
+		TESTCLIENT_TAB_TEE_ROTATION = 4,
+		TESTCLIENT_TAB_DIRECTION_ROTATION = 5,
+		NUMBER_OF_TESTCLIENT_TABS = 6,
 	};
 	static int s_CurTab = TESTCLIENT_TAB_GENERAL;
 
@@ -935,7 +994,10 @@ void CMenus::RenderSettingsTestClient(CUIRect MainView)
 			Localize("General"),
 			Localize("Name Gradient"),
 			Localize("Trail"),
-			Localize("Weather")};
+			Localize("Weather"),
+			Localize("Tee Rotation"),
+			Localize("Direction Rotation")};
+		static_assert(NUMBER_OF_TESTCLIENT_TABS == 6, "apTabNames must have 6 entries");
 		for(int Tab = 0; Tab < NUMBER_OF_TESTCLIENT_TABS; ++Tab)
 		{
 			TabBar.VSplitLeft(TabWidth, &Button, &TabBar);
@@ -1074,6 +1136,31 @@ void CMenus::RenderSettingsTestClient(CUIRect MainView)
 		Ui()->DoLabel_AutoLineSize(Localize("Colors per group"), HeadlineFontSize, TEXTALIGN_ML, &Right, HeadlineHeight);
 		Right.HSplitTop(MarginSmall, nullptr, &Right);
 
+		// Лямбда для отрисовки "окошек" (панелей) вокруг групп
+		auto DrawGroupBox = [&](CUIRect Box) {
+			Graphics()->TextureClear();
+			// Легкий фон панели
+			Graphics()->QuadsBegin();
+			Graphics()->SetColor(0.05f, 0.05f, 0.05f, 0.2f);
+			IGraphics::CQuadItem BgQuad(Box.x, Box.y, Box.w, Box.h);
+			Graphics()->QuadsDrawTL(&BgQuad, 1);
+			Graphics()->QuadsEnd();
+
+			// Рамка панели
+			Graphics()->QuadsBegin();
+			Graphics()->SetColor(0.3f, 0.3f, 0.3f, 0.5f);
+			float t = 1.0f;
+			IGraphics::CQuadItem QTop(Box.x, Box.y, Box.w, t);
+			IGraphics::CQuadItem QBot(Box.x, Box.y + Box.h - t, Box.w, t);
+			IGraphics::CQuadItem QLeft(Box.x, Box.y, t, Box.h);
+			IGraphics::CQuadItem QRight(Box.x + Box.w - t, Box.y, t, Box.h);
+			Graphics()->QuadsDrawTL(&QTop, 1);
+			Graphics()->QuadsDrawTL(&QBot, 1);
+			Graphics()->QuadsDrawTL(&QLeft, 1);
+			Graphics()->QuadsDrawTL(&QRight, 1);
+			Graphics()->QuadsEnd();
+		};
+
 		struct SGroup
 		{
 			const char *m_pTitle;
@@ -1105,11 +1192,34 @@ void CMenus::RenderSettingsTestClient(CUIRect MainView)
 
 		for(int Group = 0; Group < 3; ++Group)
 		{
-			Right.HSplitTop(MarginSmall, nullptr, &Right);
-			DoButton_CheckBoxAutoVMarginAndSet(&s_aTrailEnableCheckbox[Group], aGroups[Group].m_pTitle, aGroups[Group].m_pEnable, &Right, LineSize);
+			// Отступ между группами
+			Right.HSplitTop(30.0f, nullptr, &Right);
+
+			// Запоминаем начало группы для отрисовки рамки
+			CUIRect GroupRect = Right;
+			float GroupStartY = Right.y;
+
+			// Заголовок группы
+			CUIRect HeaderRect;
+			Right.HSplitTop(24.0f, &HeaderRect, &Right);
+			HeaderRect.Draw(ColorRGBA(0.15f, 0.15f, 0.15f, 0.8f), IGraphics::CORNER_ALL, 5.0f);
+			
+			TextRender()->TextColor(0.2f, 0.8f, 1.0f, 1.0f); // Синий цвет заголовка
+			Ui()->DoLabel(&HeaderRect, aGroups[Group].m_pTitle, 16.0f, TEXTALIGN_MC);
+			TextRender()->TextColor(TextRender()->DefaultTextColor()); // Сброс цвета
+
+			Right.HSplitTop(5.0f, nullptr, &Right);
+
+			// Чекбокс включения
+			DoButton_CheckBoxAutoVMarginAndSet(&s_aTrailEnableCheckbox[Group], Localize("Enable"), aGroups[Group].m_pEnable, &Right, LineSize);
 
 			if(!*aGroups[Group].m_pEnable)
+			{
+				// Если группа выключена, рисуем рамку и идем дальше
+				GroupRect.h = Right.y - GroupStartY;
+				DrawGroupBox(GroupRect);
 				continue;
+			}
 
 			// Style row: Dashes / Ribbon / Neon
 			Right.HSplitTop(LineSize, &Row, &Right);
@@ -1137,94 +1247,79 @@ void CMenus::RenderSettingsTestClient(CUIRect MainView)
 
 				if(g_Config.m_ClTrailDashSprite)
 				{
-					// Selected Sprite info
+					// Переключатель режима
+					static CButtonContainer s_aSpriteModeSelected[3];
+					static CButtonContainer s_aSpriteModeCycle[3];
 					Right.HSplitTop(LineSize, &Row, &Right);
-					char aBuf[128];
-					str_format(aBuf, sizeof(aBuf), "%s: %s", Localize("Selected sprite"), g_Config.m_ClTrailDashSpriteName);
-					Ui()->DoLabel(&Row, aBuf, 14.0f, TEXTALIGN_ML);
+					CUIRect ModeSel, ModeCyc;
+					Row.VSplitMid(&ModeSel, &ModeCyc);
+					if(DoButton_CheckBox(&s_aSpriteModeSelected[Group], Localize("Selected sprite"), g_Config.m_ClTrailDashSpriteMode == 0, &ModeSel))
+						g_Config.m_ClTrailDashSpriteMode = 0;
+					if(DoButton_CheckBox(&s_aSpriteModeCycle[Group], Localize("Cycle from folder"), g_Config.m_ClTrailDashSpriteMode == 1, &ModeCyc))
+						g_Config.m_ClTrailDashSpriteMode = 1;
 
 					// Header row: Label and Refresh button
 					Right.HSplitTop(LineSize, &Row, &Right);
 					CUIRect LabelRect, RefreshBtn;
 					Row.VSplitRight(80.0f, &LabelRect, &RefreshBtn);
-					Ui()->DoLabel(&LabelRect, Localize("Available sprites:"), 14.0f, TEXTALIGN_ML);
+					
+					const auto &vSprites = GameClient()->m_Trails.GetAvailableSprites();
+					if(g_Config.m_ClTrailDashSpriteMode == 0)
+					{
+						char aBuf[128];
+						str_format(aBuf, sizeof(aBuf), "%s: %s", Localize("Selected"), g_Config.m_ClTrailDashSpriteName);
+						Ui()->DoLabel(&LabelRect, aBuf, 14.0f, TEXTALIGN_ML);
+					}
+					else
+					{
+						Ui()->DoLabel(&LabelRect, Localize("Available sprites:"), 14.0f, TEXTALIGN_ML);
+					}
 					
 					static CButtonContainer s_aRefreshSprites[3];
 					if(DoButton_Menu(&s_aRefreshSprites[Group], Localize("Refresh"), 0, &RefreshBtn))
 						GameClient()->m_Trails.RefreshAvailableSprites();
 
-					const auto &vSprites = GameClient()->m_Trails.GetAvailableSprites();
-					
-					// Sprite buttons grid (Thumbnails)
-					if(!vSprites.empty())
+					// Sprite buttons grid (только в режиме Selected)
+					if(g_Config.m_ClTrailDashSpriteMode == 0)
 					{
-						static CButtonContainer s_aSpriteButtons[3][32];
-						const int SpritesPerRow = 4;
-						const float ThumbSize = 40.0f;
-						int Col = 0;
-						
-						for(size_t s = 0; s < vSprites.size() && s < 32; ++s)
+						if(!vSprites.empty())
 						{
-							if(Col == 0)
-								Right.HSplitTop(ThumbSize + 4.0f, &Row, &Right);
-							
-							CUIRect Btn;
-							Row.VSplitLeft(ThumbSize + 4.0f, &Btn, &Row);
-							Btn.Margin(2.0f, &Btn);
-							
-							const bool Active = str_comp(g_Config.m_ClTrailDashSpriteName, vSprites[s].c_str()) == 0;
-							
-							// 1. Клик по кнопке
-							if(Ui()->DoButtonLogic(&s_aSpriteButtons[Group][s], 0, &Btn, BUTTONFLAG_LEFT))
-								str_copy(g_Config.m_ClTrailDashSpriteName, vSprites[s].c_str(), sizeof(g_Config.m_ClTrailDashSpriteName));
-							
-							// 2. Фон кнопки
-							if(Active)
-								Btn.Draw(ColorRGBA(0.2f, 0.6f, 1.0f, 1.0f), IGraphics::CORNER_ALL, 3.0f);
-							else
-								Btn.Draw(ColorRGBA(0.15f, 0.15f, 0.15f, 1.0f), IGraphics::CORNER_ALL, 3.0f);
-							
-							// 3. Иконка спрайта
-							IGraphics::CTextureHandle Tex = GameClient()->m_Trails.GetSpriteTexture(vSprites[s].c_str());
-							if(Tex.IsValid() && !Tex.IsNullTexture())
+							static CButtonContainer s_aSpriteButtons[3][32];
+							const int SpritesPerRow = 3;
+							int Col = 0;
+							for(size_t s = 0; s < vSprites.size() && s < 32; ++s)
 							{
-								Graphics()->TextureSet(Tex);
-								Graphics()->WrapClamp();
-								Graphics()->QuadsBegin();
-								Graphics()->SetColor(1, 1, 1, 1);
+								if(Col == 0)
+									Right.HSplitTop(LineSize, &Row, &Right);
 								
-								float Size = Btn.w - 6.0f;
-								IGraphics::CQuadItem QuadItem(Btn.x + Btn.w/2.0f - Size/2.0f, Btn.y + Btn.h/2.0f - Size/2.0f, Size, Size);
-								Graphics()->QuadsDrawTL(&QuadItem, 1);
+								CUIRect Btn;
+								Row.VSplitLeft(Row.w / SpritesPerRow, &Btn, &Row);
 								
-								Graphics()->QuadsEnd();
-								Graphics()->WrapNormal();
+								const bool Active = str_comp(g_Config.m_ClTrailDashSpriteName, vSprites[s].c_str()) == 0;
+								if(DoButton_Menu(&s_aSpriteButtons[Group][s], vSprites[s].c_str(), Active, &Btn))
+									str_copy(g_Config.m_ClTrailDashSpriteName, vSprites[s].c_str(), sizeof(g_Config.m_ClTrailDashSpriteName));
+								
+								Col = (Col + 1) % SpritesPerRow;
 							}
-							else
-							{
-								// Если картинки нет (например, битый png) — пишем название
-								Ui()->DoLabel(&Btn, vSprites[s].c_str(), 10.0f, TEXTALIGN_MC);
-							}
-							
-							Col = (Col + 1) % SpritesPerRow;
 						}
-					}
-					else
-					{
-						Right.HSplitTop(LineSize, &Row, &Right);
-						Ui()->DoLabel(&Row, Localize("No PNG files found in trail/"), 14.0f, TEXTALIGN_ML);
+						else
+						{
+							Right.HSplitTop(LineSize, &Row, &Right);
+							Ui()->DoLabel(&Row, Localize("No PNG files found in trail/"), 14.0f, TEXTALIGN_ML);
+						}
 					}
 
 					// Sprite Size slider
 					Right.HSplitTop(LineSize, &Row, &Right);
 					Ui()->DoScrollbarOption(&g_Config.m_ClTrailDashSpriteSize, &g_Config.m_ClTrailDashSpriteSize, &Row, Localize("Sprite size (%)"), 10, 500);
+
 					// Rotate toggle
 					static CButtonContainer s_aDashRotateToggle[3];
 					Right.HSplitTop(LineSize, &Row, &Right);
 					if(DoButton_CheckBox(&s_aDashRotateToggle[Group], Localize("Rotate along direction"), g_Config.m_ClTrailDashRotate, &Row))
 						g_Config.m_ClTrailDashRotate ^= 1;
 
-					// Swing toggles
+					// Swing toggle
 					static CButtonContainer s_aDashSwingToggle[3];
 					Right.HSplitTop(LineSize, &Row, &Right);
 					if(DoButton_CheckBox(&s_aDashSwingToggle[Group], Localize("Swing rotation"), g_Config.m_ClTrailDashSwing, &Row))
@@ -1294,6 +1389,10 @@ void CMenus::RenderSettingsTestClient(CUIRect MainView)
 			CUIRect PreviewRect;
 			Right.HSplitTop(100.0f, &PreviewRect, &Right);
 			DrawTrailPreview(PreviewRect, Group);
+
+			// Отрисовываем рамку вокруг всей группы
+			GroupRect.h = Right.y - GroupStartY;
+			DrawGroupBox(GroupRect);
 		}
 
 		CUIRect UsedRect = MainView;
@@ -1359,7 +1458,126 @@ void CMenus::RenderSettingsTestClient(CUIRect MainView)
 		s_WeatherScrollRegion.End();
 		return;
 	}
+	// ***** Tee Rotation tab ***** //
+	if(s_CurTab == TESTCLIENT_TAB_TEE_ROTATION)
+	{
+		const float LineSize = 20.0f;
+		const float HeadlineFontSize = 20.0f;
+		const float HeadlineHeight = 30.0f;
+		const float MarginSmall = 5.0f;
 
+		static CScrollRegion s_TeeRotationScrollRegion;
+		CScrollRegionParams TeeRotationScrollParams;
+		TeeRotationScrollParams.m_ScrollUnit = 60.0f;
+		s_TeeRotationScrollRegion.Begin(&MainView, &TeeRotationScrollParams);
+		const float StartY = MainView.y;
+
+		CUIRect Left, Row;
+		MainView.VSplitMid(&Left, nullptr, 20.0f);
+
+		Ui()->DoLabel_AutoLineSize(Localize("Tee Rotation"), HeadlineFontSize, TEXTALIGN_ML, &Left, HeadlineHeight);
+		Left.HSplitTop(MarginSmall, nullptr, &Left);
+		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_ClTeeRotation, Localize("Enable tee rotation"), &g_Config.m_ClTeeRotation, &Left, LineSize);
+
+		Left.HSplitTop(LineSize, &Row, &Left);
+		Ui()->DoScrollbarOption(&g_Config.m_ClTeeRotationSpeed, &g_Config.m_ClTeeRotationSpeed, &Row,
+			Localize("Speed"), 1, 500, &CUi::ms_LogarithmicScrollbarScale, 0u, "%");
+
+		static CButtonContainer s_aModeButtons[2];
+		Left.HSplitTop(LineSize, &Row, &Left);
+		{
+			CUIRect ModeLinear, ModeSwing;
+			Row.VSplitMid(&ModeLinear, &ModeSwing);
+			if(DoButton_CheckBox(&s_aModeButtons[0], Localize("Linear"), g_Config.m_ClTeeRotationMode == 0, &ModeLinear))
+				g_Config.m_ClTeeRotationMode = 0;
+			if(DoButton_CheckBox(&s_aModeButtons[1], Localize("Swing"), g_Config.m_ClTeeRotationMode == 1, &ModeSwing))
+				g_Config.m_ClTeeRotationMode = 1;
+		}
+
+		if(g_Config.m_ClTeeRotationMode == 1)
+		{
+			Left.HSplitTop(LineSize, &Row, &Left);
+			Ui()->DoScrollbarOption(&g_Config.m_ClTeeRotationSwingAngle, &g_Config.m_ClTeeRotationSwingAngle,
+				&Row, Localize("Swing angle"), 0, 180, &CUi::ms_LinearScrollbarScale, 0u, "°");
+		}
+
+		Left.HSplitTop(MarginSmall, nullptr, &Left);
+		Left.HSplitTop(20.0f, &Row, &Left);
+		Ui()->DoLabel(&Row, Localize("Apply to"), 14.0f, TEXTALIGN_ML);
+
+		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_ClTeeRotationOwn,   Localize("Own tee (main)"), &g_Config.m_ClTeeRotationOwn,   &Left, LineSize);
+		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_ClTeeRotationDummy, Localize("Dummy tee"),      &g_Config.m_ClTeeRotationDummy, &Left, LineSize);
+		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_ClTeeRotationExtra, Localize("Extra tees"),     &g_Config.m_ClTeeRotationExtra, &Left, LineSize);
+		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_ClTeeRotationOthers, Localize("Other players"), &g_Config.m_ClTeeRotationOthers, &Left, LineSize);
+
+		CUIRect UsedRect = MainView;
+		UsedRect.y = StartY;
+		UsedRect.h = Left.y - StartY + 10.0f;
+		s_TeeRotationScrollRegion.AddRect(UsedRect);
+
+		s_TeeRotationScrollRegion.End();
+		return;
+	}
+	// ***** Direction Rotation tab ***** //
+	if(s_CurTab == TESTCLIENT_TAB_DIRECTION_ROTATION)
+	{
+		const float LineSize = 20.0f;
+		const float HeadlineFontSize = 20.0f;
+		const float HeadlineHeight = 30.0f;
+		const float MarginSmall = 5.0f;
+
+		static CScrollRegion s_DirRotationScrollRegion;
+		CScrollRegionParams DirRotationScrollParams;
+		DirRotationScrollParams.m_ScrollUnit = 60.0f;
+		s_DirRotationScrollRegion.Begin(&MainView, &DirRotationScrollParams);
+		const float StartY = MainView.y;
+
+		CUIRect Left, Row;
+		MainView.VSplitMid(&Left, nullptr, 20.0f);
+
+		Ui()->DoLabel_AutoLineSize(Localize("Direction Rotation"), HeadlineFontSize, TEXTALIGN_ML, &Left, HeadlineHeight);
+		Left.HSplitTop(MarginSmall, nullptr, &Left);
+		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_ClDirRotation, Localize("Enable direction rotation"), &g_Config.m_ClDirRotation, &Left, LineSize);
+
+		Left.HSplitTop(LineSize, &Row, &Left);
+		Ui()->DoScrollbarOption(&g_Config.m_ClDirRotationSpeed, &g_Config.m_ClDirRotationSpeed, &Row,
+			Localize("Speed"), 1, 500, &CUi::ms_LogarithmicScrollbarScale, 0u, "%");
+
+		static CButtonContainer s_aDirModeButtons[2];
+		Left.HSplitTop(LineSize, &Row, &Left);
+		{
+			CUIRect ModeLinear, ModeSwing;
+			Row.VSplitMid(&ModeLinear, &ModeSwing);
+			if(DoButton_CheckBox(&s_aDirModeButtons[0], Localize("Linear"), g_Config.m_ClDirRotationMode == 0, &ModeLinear))
+				g_Config.m_ClDirRotationMode = 0;
+			if(DoButton_CheckBox(&s_aDirModeButtons[1], Localize("Swing"), g_Config.m_ClDirRotationMode == 1, &ModeSwing))
+				g_Config.m_ClDirRotationMode = 1;
+		}
+
+		if(g_Config.m_ClDirRotationMode == 1)
+		{
+			Left.HSplitTop(LineSize, &Row, &Left);
+			Ui()->DoScrollbarOption(&g_Config.m_ClDirRotationSwingAngle, &g_Config.m_ClDirRotationSwingAngle,
+				&Row, Localize("Swing angle"), 0, 180, &CUi::ms_LinearScrollbarScale, 0u, "°");
+		}
+
+		Left.HSplitTop(MarginSmall, nullptr, &Left);
+		Left.HSplitTop(20.0f, &Row, &Left);
+		Ui()->DoLabel(&Row, Localize("Apply to"), 14.0f, TEXTALIGN_ML);
+
+		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_ClDirRotationOwn,   Localize("Own direction (main)"), &g_Config.m_ClDirRotationOwn,   &Left, LineSize);
+		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_ClDirRotationDummy, Localize("Dummy direction"),      &g_Config.m_ClDirRotationDummy, &Left, LineSize);
+		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_ClDirRotationExtra, Localize("Extra directions"),     &g_Config.m_ClDirRotationExtra, &Left, LineSize);
+		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_ClDirRotationOthers, Localize("Other players"),       &g_Config.m_ClDirRotationOthers, &Left, LineSize);
+
+		CUIRect UsedRect = MainView;
+		UsedRect.y = StartY;
+		UsedRect.h = Left.y - StartY + 10.0f;
+		s_DirRotationScrollRegion.AddRect(UsedRect);
+
+		s_DirRotationScrollRegion.End();
+		return;
+	}
 	// Создаем область прокрутки для всей страницы
 	static CScrollRegion s_ScrollRegion;
 	CScrollRegionParams ScrollParams;

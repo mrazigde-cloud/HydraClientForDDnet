@@ -479,6 +479,9 @@ void CTrails::OnRender()
 						Point.m_Time = Now;
 						Point.m_Id = m_aNextPointId[i]++;
 
+						// Если включен режим "Cycle", назначаем спрайт по кругу
+						if(g_Config.m_ClTrailDashSprite && g_Config.m_ClTrailDashSpriteMode == 1 && !m_vAvailableSprites.empty())
+							Point.m_SpriteIndex = Point.m_Id % (int)m_vAvailableSprites.size();
 						const int ColorMode = GetTrailColorModeForGroup(NewGroup);
 						Point.m_Color = (ColorMode == 1)
 										? GenerateRandomColor()
@@ -754,24 +757,11 @@ void CTrails::OnRender()
 		}
 		else
 		{
-			if(DashSpriteReady)
-			{
-				Graphics()->QuadsEnd();
-				Graphics()->TextureSet(m_DashTrailTexture);
-				Graphics()->WrapClamp();
-				Graphics()->QuadsBegin();
-			}
-
 			const float SpriteSizeMult = DashSpriteReady ? (g_Config.m_ClTrailDashSpriteSize / 100.0f) : 1.0f;
+			IGraphics::CTextureHandle LastTex = IGraphics::CTextureHandle();
 
-			// Получаем размеры экрана для расчета пиксельной сетки
-			const CScreenRect Screen = Graphics()->GetScreen();
-			const float ScreenTLX = Screen.m_TopLeft.x;
-			const float ScreenTLY = Screen.m_TopLeft.y;
-			const float ScreenBRX = Screen.m_BottomRight.x;
-			const float ScreenBRY = Screen.m_BottomRight.y;
-			const float PxW = (ScreenBRX - ScreenTLX) / Graphics()->ScreenWidth();
-			const float PxH = (ScreenBRY - ScreenTLY) / Graphics()->ScreenHeight();
+			if(!DashSpriteReady)
+				Graphics()->TextureClear();
 
 			for(const auto &Point : Points)
 			{
@@ -788,39 +778,49 @@ void CTrails::OnRender()
 				if(!DashSpriteReady || g_Config.m_ClTrailDashRotate)
 					Rot = atan2f(Point.m_Dir.y, Point.m_Dir.x);
 
-				// Добавляем синусоидальное покачивание для спрайтов
 				if(DashSpriteReady && g_Config.m_ClTrailDashSwing)
 				{
 					const float Freq = (float)time_freq();
 					const float TimeSec = (float)Now / Freq;
 					const float Speed = (float)g_Config.m_ClTrailDashSwingSpeed / 100.0f;
 					const float MaxAngle = (float)g_Config.m_ClTrailDashSwingAngle * (pi / 180.0f);
-					
-					// Сдвиг фазы по ID точки, чтобы получилась волна вдоль трейла
 					const float Phase = (float)Point.m_Id * 0.5f;
-					
 					Rot += sinf(TimeSec * 4.0f * Speed + Phase) * MaxAngle;
 				}
 
 				Graphics()->QuadsSetRotation(Rot);
 
-				const float DashLen = DashSpriteReady ? W : W * 2.0f;
-				
-				float DrawX = Point.m_Pos.x - DashLen / 2.0f;
-				float DrawY = Point.m_Pos.y - W / 2.0f;
-				float DrawW = DashLen;
-				float DrawH = W;
-
-				// Если используем спрайт, выравниваем по пикселям экрана
-				if(DashSpriteReady)
+				// Если это режим Cycle и у точки есть индекс — берем её текстуру
+				if(DashSpriteReady && Point.m_SpriteIndex >= 0 && Point.m_SpriteIndex < (int)m_vAvailableSprites.size())
 				{
-					DrawX = std::round((DrawX - ScreenTLX) / PxW) * PxW + ScreenTLX;
-					DrawY = std::round((DrawY - ScreenTLY) / PxH) * PxH + ScreenTLY;
-					DrawW = std::round(DrawW / PxW) * PxW;
-					DrawH = std::round(DrawH / PxH) * PxH;
+					IGraphics::CTextureHandle Tex = GetSpriteTexture(m_vAvailableSprites[Point.m_SpriteIndex].c_str());
+					if(Tex.IsValid() && !Tex.IsNullTexture())
+					{
+						if(!LastTex.IsValid() || LastTex.Id() != Tex.Id())
+						{
+							Graphics()->QuadsEnd();
+							Graphics()->TextureSet(Tex);
+							Graphics()->WrapClamp();
+							Graphics()->QuadsBegin();
+							Graphics()->SetColor(Color); // <-- Восстанавливаем цвет
+							Graphics()->QuadsSetRotation(Rot); // <-- Восстанавливаем поворот
+							LastTex = Tex;
+						}
+					}
+				}
+				else if(DashSpriteReady && (!LastTex.IsValid() || LastTex.Id() != m_DashTrailTexture.Id()))
+				{
+					Graphics()->QuadsEnd();
+					Graphics()->TextureSet(m_DashTrailTexture);
+					Graphics()->WrapClamp();
+					Graphics()->QuadsBegin();
+					Graphics()->SetColor(Color); // <-- Восстанавливаем цвет
+					Graphics()->QuadsSetRotation(Rot); // <-- Восстанавливаем поворот
+					LastTex = m_DashTrailTexture;
 				}
 
-				IGraphics::CQuadItem QuadItem(DrawX, DrawY, DrawW, DrawH);
+				const float DashLen = DashSpriteReady ? W : W * 2.0f;
+				IGraphics::CQuadItem QuadItem(Point.m_Pos.x - DashLen / 2.0f, Point.m_Pos.y - W / 2.0f, DashLen, W);
 				Graphics()->QuadsDrawTL(&QuadItem, 1);
 			}
 
