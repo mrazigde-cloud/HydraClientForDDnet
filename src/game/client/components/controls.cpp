@@ -326,7 +326,8 @@ int CControls::SnapInput(int *pData, int Slot)
 		m_ForceSnapInput = false;
 		m_aInputData[Slot].m_TargetX = (int)m_aMousePos[Slot].x;
 		m_aInputData[Slot].m_TargetY = (int)m_aMousePos[Slot].y;
-		ApplySpin(&m_aInputData[Slot], &m_aLastData[Slot], Slot, m_aMousePos[Slot], GameClient()->m_Players.GetDirectionRotationOffset());
+		if(!GameClient()->m_Snap.m_SpecInfo.m_Active)
+			ApplySpin(&m_aInputData[Slot], &m_aLastData[Slot], Slot, m_aMousePos[Slot], GameClient()->m_Players.GetDirectionRotationOffset());
 		mem_copy(pData, &m_aInputData[Slot], sizeof(CNetObj_PlayerInput));
 		return sizeof(CNetObj_PlayerInput);
 	}
@@ -480,7 +481,10 @@ int CControls::SnapInput(int *pData, int Slot)
 		// Direction rotation: replace the aim with an independent spin angle
 		// while fire and hook are released. When either is pressed, the input
 		// is left untouched so the shot/hook lands under the crosshair.
-		ApplySpin(&m_aInputData[Slot], &m_aLastData[Slot], Slot, m_aMousePos[Slot], GameClient()->m_Players.GetDirectionRotationOffset());
+		// Skip in spectate — local input doesn't matter there, and churning
+		// it every tick causes visible lag for other players in prediction.
+		if(!GameClient()->m_Snap.m_SpecInfo.m_Active)
+			ApplySpin(&m_aInputData[Slot], &m_aLastData[Slot], Slot, m_aMousePos[Slot], GameClient()->m_Players.GetDirectionRotationOffset());
 		// check if we need to send input
 		Send = Send || m_aInputData[Slot].m_Direction != m_aLastData[Slot].m_Direction;
 		Send = Send || m_aInputData[Slot].m_Jump != m_aLastData[Slot].m_Jump;

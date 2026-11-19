@@ -6,7 +6,7 @@
 #include <base/dbg.h>
 #include <base/math.h>
 #include <base/time.h>
-
+#include <cmath>
 #include <engine/client/enums.h>
 #include <engine/demo.h>
 #include <engine/graphics.h>
@@ -80,11 +80,31 @@ float CPlayers::GetDirectionRotationOffset() const
 	const float T = (float)(time() - s_StartTime) / Freq;
 	const float SpeedMultiplier = (float)g_Config.m_ClDirRotationSpeed / 100.0f;
 
-	if(g_Config.m_ClDirRotationMode == 0)
+	if(g_Config.m_ClDirRotationMode == 0) // Linear
 		return fmodf(T * SpeedMultiplier * 2.0f * pi, 2.0f * pi);
 
-	const float MaxAngle = (float)g_Config.m_ClDirRotationSwingAngle * (pi / 180.0f);
-	return sinf(T * SpeedMultiplier * 4.0f) * MaxAngle;
+	if(g_Config.m_ClDirRotationMode == 1) // Swing
+	{
+		const float MaxAngle = (float)g_Config.m_ClDirRotationSwingAngle * (pi / 180.0f);
+		return sinf(T * SpeedMultiplier * 4.0f) * MaxAngle;
+	}
+
+	if(g_Config.m_ClDirRotationMode == 2) // Loading: ease-in-out full rotation per cycle
+	{
+		// One full cycle = 2 seconds at 100% speed (faster/slower with SpeedMultiplier).
+		const float CycleDuration = 2.0f / SpeedMultiplier;
+		const float CycleT = fmodf(T, CycleDuration) / CycleDuration; // 0..1
+		// Smoothstep: 3t^2 - 2t^3 -> slow at ends, fast in the middle
+		const float Eased = CycleT * CycleT * (3.0f - 2.0f * CycleT);
+		// Start at -pi/2 (up) so the slow point is at the top, not the right
+		return -pi / 2.0f + Eased * 2.0f * pi;
+	}
+
+	// Mode 3: Step
+	const float StepInterval = 1.0f / SpeedMultiplier; // seconds between steps
+	const float StepCount = floorf(T / StepInterval);
+	const float StepAngleRad = (float)g_Config.m_ClDirRotationStepAngle * (pi / 180.0f);
+	return fmodf(StepCount * StepAngleRad, 2.0f * pi);
 }
 static float CalculateHandAngle(vec2 Dir, float AngleOffset)
 {
@@ -177,6 +197,8 @@ float CPlayers::GetPlayerTargetAngle(
 			Slot = GameClient()->m_Controls.ActiveSlot();
 		if(Slot < 0)
 			Slot = GameClient()->m_Controls.ActiveSlot();
+		if(Slot < 0 || Slot >= NUM_CONNS)
+			Slot = 0;
 
 		const CNetObj_PlayerInput &Inp = GameClient()->m_Controls.m_aInputData[Slot];
 		const bool Pressed = (Inp.m_Fire & 1) || Inp.m_Hook;
@@ -187,7 +209,7 @@ float CPlayers::GetPlayerTargetAngle(
 			return GetDirectionRotationOffset();
 
 		vec2 Direction = normalize(vec2(Inp.m_TargetX, Inp.m_TargetY));
-		if(Direction == vec2(0.0f, 0.0f))
+		if(!std::isfinite(Direction.x) || !std::isfinite(Direction.y) || length(Direction) < 1e-6f)
 			Direction = vec2(1.0f, 0.0f);
 		return angle(Direction);
 	}
@@ -231,21 +253,32 @@ float CPlayers::GetPlayerTargetAngle(
 		{
 			float MixX = mix((float)pPrevExtendedData->m_TargetX, (float)pExtendedData->m_TargetX, Intra);
 			float MixY = mix((float)pPrevExtendedData->m_TargetY, (float)pExtendedData->m_TargetY, Intra);
-			return angle(vec2(MixX, MixY));
+			vec2 Dir = vec2(MixX, MixY);
+			if(!std::isfinite(Dir.x) || !std::isfinite(Dir.y) || length(Dir) < 1e-6f)
+				Dir = vec2(1.0f, 0.0f);
+			return angle(Dir);
 		}
 		else
 		{
-			return angle(vec2(pExtendedData->m_TargetX, pExtendedData->m_TargetY));
+			vec2 Dir = vec2(pExtendedData->m_TargetX, pExtendedData->m_TargetY);
+			if(!std::isfinite(Dir.x) || !std::isfinite(Dir.y) || length(Dir) < 1e-6f)
+				Dir = vec2(1.0f, 0.0f);
+			return angle(Dir);
 		}
 	}
 	else
 	{
+		float Angle;
 		if(pPlayerChar->m_Angle > (256.0f * pi) && pPrevChar->m_Angle < 0)
-			return mix((float)pPrevChar->m_Angle, (float)(pPlayerChar->m_Angle - 256.0f * 2 * pi), Intra) / 256.0f;
+			Angle = mix((float)pPrevChar->m_Angle, (float)(pPlayerChar->m_Angle - 256.0f * 2 * pi), Intra) / 256.0f;
 		else if(pPlayerChar->m_Angle < 0 && pPrevChar->m_Angle > (256.0f * pi))
-			return mix((float)pPrevChar->m_Angle, (float)(pPlayerChar->m_Angle + 256.0f * 2 * pi), Intra) / 256.0f;
+			Angle = mix((float)pPrevChar->m_Angle, (float)(pPlayerChar->m_Angle + 256.0f * 2 * pi), Intra) / 256.0f;
 		else
-			return mix((float)pPrevChar->m_Angle, (float)pPlayerChar->m_Angle, Intra) / 256.0f;
+			Angle = mix((float)pPrevChar->m_Angle, (float)pPlayerChar->m_Angle, Intra) / 256.0f;
+
+		if(!std::isfinite(Angle))
+			Angle = 0.0f;
+		return Angle;
 	}
 }
 void CPlayers::RenderHookCollLine(
@@ -317,9 +350,13 @@ void CPlayers::RenderHookCollLine(
 
 	float Intra = GameClient()->m_aClients[ClientId].m_IsPredicted ? Client()->PredIntraGameTick(g_Config.m_ClDummy) : Client()->IntraGameTick(g_Config.m_ClDummy);
 	float Angle = GetPlayerTargetAngle(&Prev, &Player, ClientId, Intra);
+	if(!std::isfinite(Angle))
+		Angle = 0.0f;
 
 	vec2 Position = GameClient()->m_aClients[ClientId].m_RenderPos;
 	vec2 Direction = direction(Angle);
+	if(!std::isfinite(Direction.x) || !std::isfinite(Direction.y) || length(Direction) < 1e-6f)
+		Direction = vec2(1.0f, 0.0f);
 
 	// When the other player isn't predicted, we don't know their tunes.
 	// Use our own tunes instead. This is wrong, but a good heuristic.
@@ -614,6 +651,22 @@ void CPlayers::RenderHook(
 	else
 		Position = mix(vec2(Prev.m_X, Prev.m_Y), vec2(Player.m_X, Player.m_Y), Intra);
 
+	// В spectate m_RenderPos часто бывает (0,0) или устаревшим,
+	// если персонаж только что стал Active. Берём позицию из snap.
+	if(GameClient()->m_Snap.m_SpecInfo.m_Active &&
+		in_range(ClientId, MAX_CLIENTS - 1) &&
+		GameClient()->m_Snap.m_aCharacters[ClientId].m_Active)
+	{
+		const auto &Char = GameClient()->m_Snap.m_aCharacters[ClientId];
+		Position = mix(
+			vec2(Char.m_Prev.m_X, Char.m_Prev.m_Y),
+			vec2(Char.m_Cur.m_X, Char.m_Cur.m_Y),
+			Client()->IntraGameTick(g_Config.m_ClDummy));
+	}
+
+	if(!ScreenRect.Inside(Position))
+		return;
+
 	// draw hook
 	Graphics()->SetColor(1.0f, 1.0f, 1.0f, 1.0f);
 	if(ClientId < 0)
@@ -683,6 +736,14 @@ void CPlayers::RenderPlayer(
 	else
 		Position = mix(vec2(Prev.m_X, Prev.m_Y), vec2(Player.m_X, Player.m_Y), Intra);
 
+	const bool Spec = GameClient()->m_Snap.m_SpecInfo.m_Active;
+	const int LocalId = GameClient()->m_Snap.m_LocalClientId;
+	const bool Avail = IsPlayerInfoAvailable(ClientId);
+
+	dbg_msg("spect", "RenderPlayer cid=%d local=%d spec=%d avail=%d pos=(%.0f,%.0f) inside=%d",
+		ClientId, LocalId, (int)Spec, (int)Avail,
+		Position.x, Position.y, (int)ScreenRect.Inside(Position));
+
 	if(!ScreenRect.Inside(Position))
 		return;
 
@@ -725,8 +786,15 @@ void CPlayers::RenderPlayer(
 	// connections and comes back from the server for everyone else. Do NOT
 	// add the offset again here, or the tee would rotate twice.
 	float Angle = GetPlayerTargetAngle(&Prev, &Player, ClientId, Intra);
+	if(!std::isfinite(Angle))
+		Angle = 0.0f;
 
 	vec2 Direction = direction(Angle);
+	if(!std::isfinite(Direction.x) || !std::isfinite(Direction.y) || length(Direction) < 1e-6f)
+		Direction = vec2(1.0f, 0.0f);
+
+	dbg_msg("spect", "  -> cid=%d angle=%.3f dir=(%.3f,%.3f) teeRot=%d",
+		ClientId, Angle, Direction.x, Direction.y, (int)ShouldRotateTee(ClientId));
 	vec2 Vel = mix(vec2(Prev.m_VelX / 256.0f, Prev.m_VelY / 256.0f), vec2(Player.m_VelX / 256.0f, Player.m_VelY / 256.0f), Intra);
 
 	GameClient()->m_Flow.Add(Position, Vel * 100.0f, 10.0f);
@@ -1048,9 +1116,17 @@ void CPlayers::RenderPlayer(
 
 inline bool CPlayers::IsPlayerInfoAvailable(int ClientId) const
 {
-	return GameClient()->m_Snap.m_aCharacters[ClientId].m_Active &&
-	       GameClient()->m_Snap.m_apPrevPlayerInfos[ClientId] != nullptr &&
-	       GameClient()->m_Snap.m_apPlayerInfos[ClientId] != nullptr;
+	const bool Active = GameClient()->m_Snap.m_aCharacters[ClientId].m_Active;
+	const bool HasPrev = GameClient()->m_Snap.m_apPrevPlayerInfos[ClientId] != nullptr;
+	const bool HasCur  = GameClient()->m_Snap.m_apPlayerInfos[ClientId] != nullptr;
+
+	if(GameClient()->m_Snap.m_SpecInfo.m_Active && (Active || HasPrev || HasCur))
+	{
+		dbg_msg("spect", "IsPlayerInfoAvailable cid=%d active=%d prev=%d cur=%d",
+			ClientId, (int)Active, (int)HasPrev, (int)HasCur);
+	}
+
+	return Active && HasPrev && HasCur;
 }
 
 void CPlayers::OnRender()
@@ -1065,6 +1141,124 @@ void CPlayers::OnRender()
 	{
 		aRenderInfo[i] = GameClient()->m_aClients[i].m_RenderInfo;
 		aRenderInfo[i].m_TeeRenderFlags = 0;
+
+		// Force skin: override skin for all players
+		if(g_Config.m_ClForceSkinMode > 0)
+		{
+			const int LocalClientId = GameClient()->m_Snap.m_LocalClientId;
+			const bool SkipLocal = g_Config.m_ClForceSkinExcludeLocal && i == LocalClientId;
+			if(!SkipLocal)
+			{
+				const CSkin *pSkin = nullptr;
+				if(g_Config.m_ClForceSkinMode == 1)
+					pSkin = GameClient()->m_Skins.Find(g_Config.m_ClPlayerSkin);
+				else if(g_Config.m_ClForceSkinMode == 2)
+					pSkin = GameClient()->m_Skins.Find(g_Config.m_ClForceSkinName);
+				else if(g_Config.m_ClForceSkinMode == 3)
+				{
+					auto &SkinList = GameClient()->m_Skins.SkinList();
+					const uint32_t Num = (uint32_t)SkinList.Skins().size();
+					if(Num > 0)
+					{
+						const uint32_t Seed = (uint32_t)g_Config.m_ClForceSkinRandomSeed;
+						const uint32_t Hash = (uint32_t)i * 2654435761u + Seed;
+
+						CSkins::CSkinListEntry &Entry = SkinList.Skins()[Hash % Num];
+						const CSkins::CSkinContainer *pContainer = Entry.SkinContainer();
+						if(pContainer != nullptr)
+						{
+							// Keep the skin loaded and pending across frames.
+							Entry.RequestLoad();
+							const std::unique_ptr<CSkin> &pSkinPtr = pContainer->Skin();
+							if(pSkinPtr)
+								pSkin = pSkinPtr.get();
+						}
+					}
+				}
+
+				if(pSkin)
+				{
+					aRenderInfo[i].m_aSixup[g_Config.m_ClDummy].Reset();
+					aRenderInfo[i].Apply(pSkin);
+
+					if(g_Config.m_ClForceSkinUseMyColors)
+					{
+						// DDNet stores the *clamped* lightness in the config
+						// and expands it back with `UnclampLighting` when
+						// rendering. Colorable skin textures are grayscale
+						// (~0.5 in the body area), so without this expansion
+						// `color * texture` looks roughly twice as dark as
+						// the Tee tab preview shows.
+						//
+						// DarkestLight = 0.5 matches the picker's preview in
+						// menus_settings.cpp (see `RenderHslaScrollbars`).
+						constexpr float s_ForceSkinDarkestLight = 0.5f;
+
+						ColorHSLA BodyHsl = ColorHSLA(g_Config.m_ClPlayerColorBody);
+						ColorHSLA FeetHsl = ColorHSLA(g_Config.m_ClPlayerColorFeet);
+
+						// 0 is a common "unset" value in configs; treat as white,
+						// never black.
+						if(g_Config.m_ClPlayerColorBody == 0)
+							BodyHsl = ColorHSLA(0.0f, 0.0f, 1.0f, 1.0f);
+						if(g_Config.m_ClPlayerColorFeet == 0)
+							FeetHsl = ColorHSLA(0.0f, 0.0f, 1.0f, 1.0f);
+
+						// This is the "brightness" step. `l ∈ [0,1]` -> `[DarkestLight, 1]`.
+						BodyHsl = BodyHsl.UnclampLighting(s_ForceSkinDarkestLight);
+						FeetHsl = FeetHsl.UnclampLighting(s_ForceSkinDarkestLight);
+
+						// Also make sure alpha is 1.0 — a semi-transparent body
+						// would render darker against the map.
+						BodyHsl.a = 1.0f;
+						FeetHsl.a = 1.0f;
+
+						aRenderInfo[i].m_CustomColoredSkin = true;
+						aRenderInfo[i].m_ColorBody = color_cast<ColorRGBA>(BodyHsl);
+						aRenderInfo[i].m_ColorFeet = color_cast<ColorRGBA>(FeetHsl);
+					}
+					else if(g_Config.m_ClForceSkinRandomColors)
+					{
+						// Must be the same DarkestLight as the "My colors" branch
+						// so that random colors render at the same brightness.
+						constexpr float s_ForceSkinDarkestLight = 0.5f;
+
+						const uint32_t ColorSeed = (uint32_t)g_Config.m_ClForceSkinRandomColorSeed;
+						const uint32_t ColorHash =
+							(uint32_t)i * 2654435761u +
+							ColorSeed * 2246822519u +
+							0x9E3779B9u;
+
+						const float Hue = (float)((ColorHash >> 16) & 0xFFFF) / 65535.0f;
+						const float Sat = 0.65f + ((ColorHash >> 8) & 0xFF) / 255.0f * 0.35f; // 0.65..1.0
+
+						// Raw lightness in HSLA space. After UnclampLighting(0.5)
+						// this becomes [0.675, 0.85] — bright enough on the
+						// grayscale colorable skin, still clearly colored.
+						const float LhtRaw = 0.35f + (ColorHash & 0xFF) / 255.0f * 0.35f; // 0.35..0.70
+
+						// Complementary hue for feet so the tee is intentionally
+						// two-tone, not "random-random".
+						const float FeetHue = fmodf(Hue + 0.5f, 1.0f);
+
+						ColorHSLA BodyHsl(Hue, Sat, LhtRaw);
+						ColorHSLA FeetHsl(FeetHue, Sat, LhtRaw);
+
+						// Same "brightness expansion" as the My-colors branch.
+						BodyHsl = BodyHsl.UnclampLighting(s_ForceSkinDarkestLight);
+						FeetHsl = FeetHsl.UnclampLighting(s_ForceSkinDarkestLight);
+
+						// Never let alpha kill the perceived brightness.
+						BodyHsl.a = 1.0f;
+						FeetHsl.a = 1.0f;
+
+						aRenderInfo[i].m_CustomColoredSkin = true;
+						aRenderInfo[i].m_ColorBody = color_cast<ColorRGBA>(BodyHsl);
+						aRenderInfo[i].m_ColorFeet = color_cast<ColorRGBA>(FeetHsl);
+					}
+				}
+			}
+		}
 
 		// predict freeze skin only for local players
 		bool Frozen = false;
@@ -1152,16 +1346,20 @@ void CPlayers::OnRender()
 	// render everyone else's tee, then either our own or the tee we are spectating.
 	const int RenderLastId = (GameClient()->m_Snap.m_SpecInfo.m_SpectatorId != SPEC_FREEVIEW && GameClient()->m_Snap.m_SpecInfo.m_Active) ? GameClient()->m_Snap.m_SpecInfo.m_SpectatorId : LocalClientId;
 
+	int NumTried = 0;
+	int NumAvail = 0;
 	for(int ClientId = 0; ClientId < MAX_CLIENTS; ClientId++)
 	{
+		if(IsPlayerInfoAvailable(ClientId))
+			NumAvail++;
 		if(ClientId == RenderLastId || !IsPlayerInfoAvailable(ClientId))
-		{
 			continue;
-		}
-
+		NumTried++;
 		RenderHookCollLine(ScreenRect, &GameClient()->m_aClients[ClientId].m_RenderPrev, &GameClient()->m_aClients[ClientId].m_RenderCur, ClientId);
 		RenderPlayer(ScreenRect, &GameClient()->m_aClients[ClientId].m_RenderPrev, &GameClient()->m_aClients[ClientId].m_RenderCur, &aRenderInfo[ClientId], ClientId);
 	}
+	dbg_msg("spect", "OnRender: SpecActive=%d LocalId=%d RenderLastId=%d NumAvail=%d NumTried=%d",
+		(int)GameClient()->m_Snap.m_SpecInfo.m_Active, LocalClientId, RenderLastId, NumAvail, NumTried);
 	if(RenderLastId != -1 && IsPlayerInfoAvailable(RenderLastId))
 	{
 		const CGameClient::CClientData *pClientData = &GameClient()->m_aClients[RenderLastId];

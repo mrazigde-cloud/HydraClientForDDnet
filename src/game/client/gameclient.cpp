@@ -1854,10 +1854,47 @@ static CGameInfo GetGameInfo(const CNetObj_GameInfoEx *pInfoEx, int InfoExSize, 
 
 void CGameClient::InvalidateSnapshot()
 {
-	// clear all pointers
+	CSnapState::CCharacterInfo aSavedChars[MAX_CLIENTS];
+	bool aHadChar[MAX_CLIENTS];
+	const bool KeepChars = m_Snap.m_SpecInfo.m_Active;
+
+	if(KeepChars)
+	{
+		for(int i = 0; i < MAX_CLIENTS; i++)
+		{
+			aHadChar[i] = m_Snap.m_aCharacters[i].m_Active;
+			if(aHadChar[i])
+			{
+				aSavedChars[i].m_Cur = m_Snap.m_aCharacters[i].m_Cur;
+				aSavedChars[i].m_Prev = m_Snap.m_aCharacters[i].m_Prev;
+				aSavedChars[i].m_ExtendedData = m_Snap.m_aCharacters[i].m_ExtendedData;
+				aSavedChars[i].m_HasExtendedData = m_Snap.m_aCharacters[i].m_HasExtendedData;
+				aSavedChars[i].m_HasExtendedDisplayInfo = m_Snap.m_aCharacters[i].m_HasExtendedDisplayInfo;
+			}
+		}
+	}
+
 	mem_zero(&m_Snap, sizeof(m_Snap));
 	m_Snap.m_SpecInfo.m_Zoom = 1.0f;
 	m_Snap.m_LocalClientId = -1;
+
+	if(KeepChars)
+	{
+		for(int i = 0; i < MAX_CLIENTS; i++)
+		{
+			if(!aHadChar[i])
+				continue;
+
+			m_Snap.m_aCharacters[i].m_Active = true;
+			m_Snap.m_aCharacters[i].m_Cur = aSavedChars[i].m_Cur;
+			m_Snap.m_aCharacters[i].m_Prev = aSavedChars[i].m_Prev;
+			m_Snap.m_aCharacters[i].m_ExtendedData = aSavedChars[i].m_ExtendedData;
+			m_Snap.m_aCharacters[i].m_HasExtendedData = aSavedChars[i].m_HasExtendedData;
+			m_Snap.m_aCharacters[i].m_HasExtendedDisplayInfo = aSavedChars[i].m_HasExtendedDisplayInfo;
+			m_Snap.m_aCharacters[i].m_pPrevExtendedData = nullptr;
+		}
+	}
+
 	SnapCollectEntities();
 }
 
@@ -1877,6 +1914,19 @@ void CGameClient::OnNewSnapshot(bool DummySwapped)
 			TempCore.Tick(false);
 			TempCore.Move();
 			TempCore.Quantize();
+		}
+		if(m_Snap.m_SpecInfo.m_Active)
+		{
+			int NumChar = 0;
+			for(int i = 0; i < MAX_CLIENTS; i++)
+				if(m_Snap.m_aCharacters[i].m_Active)
+					NumChar++;
+			static int s_LastLog = 0;
+			if(Client()->GameTick(0) - s_LastLog >= Client()->GameTickSpeed()) // раз в секунду
+			{
+				dbg_msg("spect", "chars_in_snap=%d tick=%d", NumChar, Client()->GameTick(0));
+				s_LastLog = Client()->GameTick(0);
+			}
 		}
 
 		TempCore.Write(pCharacter);
@@ -2024,9 +2074,9 @@ void CGameClient::OnNewSnapshot(bool DummySwapped)
 				{
 					const void *pOld = Client()->SnapFindItem(IClient::SNAP_PREV, NETOBJTYPE_CHARACTER, Item.m_Id);
 					m_Snap.m_aCharacters[Item.m_Id].m_Cur = *((const CNetObj_Character *)Item.m_pData);
+					m_Snap.m_aCharacters[Item.m_Id].m_Active = true;
 					if(pOld)
 					{
-						m_Snap.m_aCharacters[Item.m_Id].m_Active = true;
 						m_Snap.m_aCharacters[Item.m_Id].m_Prev = *((const CNetObj_Character *)pOld);
 
 						// limit evolving to 3 seconds
@@ -2052,6 +2102,7 @@ void CGameClient::OnNewSnapshot(bool DummySwapped)
 					}
 					else
 					{
+						m_Snap.m_aCharacters[Item.m_Id].m_Prev = m_Snap.m_aCharacters[Item.m_Id].m_Cur;
 						m_aClients[Item.m_Id].m_Evolved.m_Tick = -1;
 					}
 				}

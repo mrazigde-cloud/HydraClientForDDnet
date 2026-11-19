@@ -48,7 +48,7 @@ public:
 	static constexpr float BUTTON_IMAGE_WIDTH_FACTOR = 4.0f;
 
 	int DoButton_Toggle(const void *pId, int Checked, const CUIRect *pRect, bool Active, unsigned Flags = BUTTONFLAG_LEFT);
-	int DoButton_Menu(CButtonContainer *pButtonContainer, const char *pText, int Checked, const CUIRect *pRect, unsigned Flags = BUTTONFLAG_LEFT, const char *pImageName = nullptr, int Corners = IGraphics::CORNER_ALL, float Rounding = 5.0f, float FontFactor = 0.0f, ColorRGBA Color = ColorRGBA(1.0f, 1.0f, 1.0f, 0.5f), const void *pImageHotId = nullptr);
+	int DoButton_Menu(CButtonContainer *pButtonContainer, const char *pText, int Checked, const CUIRect *pRect, unsigned Flags = BUTTONFLAG_LEFT, const char *pImageName = nullptr, int Corners = IGraphics::CORNER_ALL, float Rounding = 5.0f, float FontFactor = 0.0f, ColorRGBA Color = ColorRGBA(1.0f, 1.0f, 1.0f, 0.5f), const void *pImageHotId = nullptr, SUIAnimator *pAnimator = nullptr);
 	int DoButton_MenuTab(CButtonContainer *pButtonContainer, const char *pText, int Checked, const CUIRect *pRect, int Corners, SUIAnimator *pAnimator = nullptr, const ColorRGBA *pDefaultColor = nullptr, const ColorRGBA *pActiveColor = nullptr, const ColorRGBA *pHoverColor = nullptr, float EdgeRounding = 10.0f, const CCommunityIcon *pCommunityIcon = nullptr);
 
 	int DoButton_CheckBox_Common(const void *pId, const char *pText, const char *pBoxText, const CUIRect *pRect, unsigned Flags);
@@ -62,7 +62,7 @@ private:
 	CUi::SColorPickerPopupContext m_ColorPickerPopupContext;
 	ColorHSLA DoLine_ColorPicker(CButtonContainer *pResetId, float LineSize, float LabelSize, float BottomMargin, CUIRect *pMainRect, const char *pText, unsigned int *pColorValue, ColorRGBA DefaultColor, bool CheckBoxSpacing = true, int *pCheckBoxValue = nullptr, bool Alpha = false);
 	ColorHSLA DoButton_ColorPicker(const CUIRect *pRect, unsigned int *pHslaColor, bool Alpha);
-
+	void DoForceSkinPicker(CUIRect View);
 	int DoButton_GridHeader(const void *pId, const char *pText, int Checked, const CUIRect *pRect, int Align = TEXTALIGN_ML);
 	int DoButton_Favorite(const void *pButtonId, const void *pParentId, bool Checked, const CUIRect *pRect);
 
@@ -141,6 +141,29 @@ protected:
 
 	int m_MenuPage;
 	int m_GamePage;
+
+	struct SStartMenuTransition
+	{
+		bool m_Active = false;
+		int m_TargetPage = -1;
+		int64_t m_StartTime = 0;
+		bool m_Reverse = false;
+	};
+
+	SStartMenuTransition m_StartMenuTransition;
+	struct SPageTransition
+	{
+		int m_FromPage = -1;
+		int m_ToPage = -1;
+		int64_t m_StartTime = 0;
+		bool m_Active = false;
+		bool m_Reverse = false;
+	};
+
+	SPageTransition m_MenuPageTransition;
+	SPageTransition m_GamePageTransition;
+	int m_AnimatedPage;
+	int64_t m_PageAnimationStart;
 	int m_Popup;
 	bool m_ShowStart;
 	bool m_MenuActive;
@@ -582,6 +605,20 @@ protected:
 	// found in menus_settings_ddnet.cpp
 	void RenderSettingsDDNet(CUIRect MainView);
 	void RenderSettingsTestClient(CUIRect MainView);
+	void RenderSettingsAnimations(CUIRect MainView);
+	void RenderSettingsTabContent(int Page, CUIRect View);
+	void SetMenuBackgroundForPage(int Page);
+	static float EaseTabSlide(float t, int Mode);
+
+	struct SSettingsPageAnim
+	{
+		int m_FromPage = -1;
+		int m_ToPage = -1;
+		int64_t m_StartTime = 0;
+		bool m_Active = false;
+		bool m_Reverse = false;
+	};
+	SSettingsPageAnim m_SettingsPageAnim;
 	void ResetTestClientSettings();
 	void DrawNameGradientPreview(CUIRect Rect, unsigned int Color1, unsigned int Color2, unsigned int Color3, bool Wave);
 	void DrawTrailPreview(CUIRect Rect, int Group);
@@ -721,8 +758,8 @@ public:
 		SETTINGS_DDNET,
 		SETTINGS_ASSETS,
 		SETTINGS_TESTCLIENT,
+		SETTINGS_ANIMATIONS,
 		SETTINGS_CREDITS,
-
 		SETTINGS_LENGTH,
 	};
 

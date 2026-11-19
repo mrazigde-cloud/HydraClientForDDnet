@@ -64,6 +64,8 @@ CMenus::CMenus()
 	m_Popup = POPUP_NONE;
 	m_MenuPage = 0;
 	m_GamePage = PAGE_GAME;
+	m_AnimatedPage = 0;
+	m_PageAnimationStart = 0;
 
 	m_NeedRestartGraphics = false;
 	m_NeedRestartSound = false;
@@ -122,21 +124,50 @@ int CMenus::DoButton_Toggle(const void *pId, int Checked, const CUIRect *pRect, 
 	return Active ? Ui()->DoButtonLogic(pId, Checked, pRect, Flags) : 0;
 }
 
-int CMenus::DoButton_Menu(CButtonContainer *pButtonContainer, const char *pText, int Checked, const CUIRect *pRect, const unsigned Flags, const char *pImageName, int Corners, float Rounding, float FontFactor, ColorRGBA Color, const void *pImageHotId)
+int CMenus::DoButton_Menu(CButtonContainer *pButtonContainer, const char *pText, int Checked, const CUIRect *pRect, const unsigned Flags, const char *pImageName, int Corners, float Rounding, float FontFactor, ColorRGBA Color, const void *pImageHotId, SUIAnimator *pAnimator)
 {
+	// Hover animation: expand around center while keeping the original click zone.
+	CUIRect Rect = *pRect;
+	if(pAnimator != nullptr)
+	{
+		auto Time = time_get_nanoseconds();
+		if(pAnimator->m_Time + 100ms < Time)
+		{
+			pAnimator->m_Value = pAnimator->m_Active ? 1 : 0;
+			pAnimator->m_Time = Time;
+		}
+
+		const bool MouseInside = Ui()->HotItem() == pButtonContainer;
+		pAnimator->m_Active = Checked || MouseInside || Ui()->CheckActiveItem(pButtonContainer);
+
+		if(pAnimator->m_Active)
+			pAnimator->m_Value = std::clamp<float>(pAnimator->m_Value + (Time - pAnimator->m_Time).count() / (double)std::chrono::nanoseconds(100ms).count(), 0, 1);
+		else
+			pAnimator->m_Value = std::clamp<float>(pAnimator->m_Value - (Time - pAnimator->m_Time).count() / (double)std::chrono::nanoseconds(100ms).count(), 0, 1);
+
+		pAnimator->m_Time = Time;
+
+		const float V = pAnimator->m_Value;
+		const float DeltaW = V * pAnimator->m_WOffset;
+		const float DeltaH = V * pAnimator->m_HOffset;
+		Rect.x -= DeltaW * 0.5f;
+		Rect.y -= DeltaH * 0.5f;
+		Rect.w += DeltaW;
+		Rect.h += DeltaH;
+	}
+
 	CUIRect Text = *pRect;
 
 	if(Checked)
 		Color = ColorRGBA(0.6f, 0.6f, 0.6f, 0.5f);
 	Color.a *= Ui()->ButtonColorMul(pButtonContainer);
 
-	pRect->Draw(Color, Corners, Rounding);
+	Rect.Draw(Color, Corners, Rounding);
 
 	if(pImageName)
 	{
 		CUIRect Image;
-		pRect->VSplitRight(pRect->h * BUTTON_IMAGE_WIDTH_FACTOR, &Text, &Image); // always correct ratio for image
-
+		Rect.VSplitRight(Rect.h * BUTTON_IMAGE_WIDTH_FACTOR, &Text, &Image);
 		// render image
 		const CMenuImage *pImage = FindMenuImage(pImageName);
 		if(pImage)
@@ -461,17 +492,6 @@ void CMenus::RenderMenubar(CUIRect Box, IClient::EClientState ClientState)
 	Box.VSplitRight(33.0f, &Box, &Button);
 	static CButtonContainer s_QuitButton;
 	ColorRGBA QuitColor(1, 0, 0, 0.5f);
-	if(DoButton_MenuTab(&s_QuitButton, FontIcon::POWER_OFF, 0, &Button, IGraphics::CORNER_T, &m_aAnimatorsSmallPage[SMALL_TAB_QUIT], nullptr, nullptr, &QuitColor, 10.0f))
-	{
-		if(GameClient()->Editor()->HasUnsavedData() || (GameClient()->CurrentRaceTime() / 60 >= g_Config.m_ClConfirmQuitTime && g_Config.m_ClConfirmQuitTime >= 0) || m_MenusIngameTouchControls.UnsavedChanges() || GameClient()->m_TouchControls.HasEditingChanges())
-		{
-			m_Popup = POPUP_QUIT;
-		}
-		else
-		{
-			Client()->Quit();
-		}
-	}
 	Ui()->DoToolTip(&s_QuitButton, &Button, Localize("Quit"));
 
 	Box.VSplitRight(10.0f, &Box, nullptr);
@@ -677,10 +697,8 @@ void CMenus::RenderMenubar(CUIRect Box, IClient::EClientState ClientState)
 
 	if(NewPage != -1)
 	{
-		if(ClientState == IClient::STATE_OFFLINE)
-			SetMenuPage(NewPage);
-		else
-			m_GamePage = NewPage;
+		GameClient()->m_Menus.SetMenuPage(NewPage);
+		GameClient()->m_Menus.SetShowStart(false);
 	}
 }
 
@@ -1038,6 +1056,113 @@ void CMenus::Render()
 	{
 		Screen.Margin(10.0f, &Screen);
 	}
+	auto RenderPageContent = [&](int Page, CUIRect View, bool Online)
+	{
+		if(!Online)
+		{
+			if(Page == PAGE_NEWS)
+				RenderNews(View);
+			else if(Page >= PAGE_INTERNET && Page <= PAGE_FAVORITE_COMMUNITY_5)
+				RenderServerbrowser(View);
+			else if(Page == PAGE_DEMOS)
+				RenderDemoBrowser(View);
+			else if(Page == PAGE_SETTINGS)
+				RenderSettings(View);
+		}
+		else
+		{
+			if(Page == PAGE_GAME)
+			{
+				RenderGame(View);
+				RenderIngameHint();
+			}
+			else if(Page == PAGE_PLAYERS)
+				RenderPlayers(View);
+			else if(Page == PAGE_SERVER_INFO)
+				RenderServerInfo(View);
+			else if(Page == PAGE_NETWORK)
+				RenderInGameNetwork(View);
+			else if(Page == PAGE_GHOST)
+				RenderGhost(View);
+			else if(Page == PAGE_CALLVOTE)
+				RenderServerControl(View);
+			else if(Page == PAGE_DEMOS)
+				RenderDemoBrowser(View);
+			else if(Page == PAGE_SETTINGS)
+				RenderSettings(View);
+		}
+	};
+
+	auto RenderAnimatedPage = [&](SPageTransition &Animation, int CurrentPage, CUIRect View, bool Online)
+	{
+		if(Animation.m_ToPage == -1)
+		{
+			Animation.m_FromPage = CurrentPage;
+			Animation.m_ToPage = CurrentPage;
+		}
+
+		if(Animation.m_ToPage != CurrentPage)
+		{
+			Animation.m_FromPage = Animation.m_ToPage;
+			Animation.m_ToPage = CurrentPage;
+			Animation.m_StartTime = time();
+			Animation.m_Active = true;
+		}
+
+		if(!Animation.m_Active)
+		{
+			RenderPageContent(CurrentPage, View, Online);
+			return;
+		}
+
+		const float Duration = 0.25f;
+		float Progress = (time() - Animation.m_StartTime) / (float)time_freq() / Duration;
+		Progress = std::clamp(Progress, 0.0f, 1.0f);
+
+		if(Progress >= 1.0f)
+		{
+			Animation.m_Active = false;
+		}
+
+		const float Eased = 1.0f - std::pow(1.0f - Progress, 3.0f);
+		const float Direction = Animation.m_ToPage > Animation.m_FromPage ? 1.0f : -1.0f;
+
+		auto DrawPage = [&](int Page, CUIRect PageView, bool Interactive)
+		{
+			const float X0 = std::max(View.x, PageView.x);
+			const float X1 = std::min(View.x + View.w, PageView.x + PageView.w);
+
+			if(X1 <= X0)
+				return;
+
+			CUIRect Clip = View;
+			Clip.x = X0;
+			Clip.w = X1 - X0;
+
+			Ui()->ClipEnable(&Clip);
+			Ui()->SetEnabled(Interactive);
+			RenderPageContent(Page, PageView, Online);
+			Ui()->SetEnabled(true);
+			Ui()->ClipDisable();
+		};
+
+		CUIRect OldView = View;
+		OldView.x -= Direction * Eased * View.w;
+		DrawPage(Animation.m_FromPage, OldView, false);
+
+		CUIRect NewView = View;
+		NewView.x += Direction * (1.0f - Eased) * View.w;
+		DrawPage(Animation.m_ToPage, NewView, true);
+	};
+	const int CurrentPage = ClientState == IClient::STATE_ONLINE ? m_GamePage : m_MenuPage;
+	if(m_AnimatedPage != CurrentPage)
+	{
+		m_AnimatedPage = CurrentPage;
+		m_PageAnimationStart = time_get();
+	}
+	const float PageAnimationProgress = std::clamp((time_get() - m_PageAnimationStart) / (float)(time_freq() * 0.24), 0.0f, 1.0f);
+	const float PageAnimationEase = 1.0f - std::pow(1.0f - PageAnimationProgress, 3.0f);
+	const float PageAnimationOffset = (1.0f - PageAnimationEase) * 42.0f;
 
 	switch(ClientState)
 	{
@@ -1059,6 +1184,82 @@ void CMenus::Render()
 		{
 			RenderPopupFullscreen(Screen);
 		}
+		else if(m_StartMenuTransition.m_Active)
+		{
+			const float Duration = g_Config.m_ClStartMenuAnimationDuration / 1000.0f;
+			float Progress = (time() - m_StartMenuTransition.m_StartTime) / (float)time_freq() / Duration;
+			Progress = std::clamp(Progress, 0.0f, 1.0f);
+
+			const float Eased = Progress * Progress * (3.0f - 2.0f * Progress);
+
+			CUIRect OldScreen = Screen;
+			CUIRect NewScreen = Screen;
+
+			if(!m_StartMenuTransition.m_Reverse)
+			{
+				OldScreen.y -= Eased * Screen.h;
+				NewScreen.y += (1.0f - Eased) * Screen.h;
+			}
+			else
+			{
+				OldScreen.y += Eased * Screen.h;
+				NewScreen.y -= (1.0f - Eased) * Screen.h;
+			}
+
+		Ui()->ClipEnable(&Screen);
+
+		if(!m_StartMenuTransition.m_Reverse)
+		{
+			Ui()->SetEnabled(false);
+			m_MenusStart.RenderStartMenu(OldScreen);
+			Ui()->SetEnabled(true);
+
+			CUIRect TabBar, MainView;
+			NewScreen.HSplitTop(24.0f, &TabBar, &MainView);
+
+			const int TargetPage = m_StartMenuTransition.m_TargetPage;
+
+			if(TargetPage >= PAGE_INTERNET && TargetPage <= PAGE_FAVORITE_COMMUNITY_5)
+				RenderServerbrowser(MainView);
+			else if(TargetPage == PAGE_DEMOS)
+				RenderDemoBrowser(MainView);
+			else if(TargetPage == PAGE_SETTINGS)
+				RenderSettings(MainView);
+		}
+		else
+		{
+			Ui()->SetEnabled(false);
+			m_MenusStart.RenderStartMenu(NewScreen);
+			Ui()->SetEnabled(true);
+
+			CUIRect TabBar, MainView;
+			OldScreen.HSplitTop(24.0f, &TabBar, &MainView);
+
+			const int TargetPage = m_StartMenuTransition.m_TargetPage;
+
+			if(TargetPage >= PAGE_INTERNET && TargetPage <= PAGE_FAVORITE_COMMUNITY_5)
+				RenderServerbrowser(MainView);
+			else if(TargetPage == PAGE_DEMOS)
+				RenderDemoBrowser(MainView);
+			else if(TargetPage == PAGE_SETTINGS)
+				RenderSettings(MainView);
+		}
+
+		Ui()->ClipDisable();
+
+			if(Progress >= 1.0f)
+			{
+				m_StartMenuTransition.m_Active = false;
+
+				if(m_StartMenuTransition.m_Reverse)
+				{
+					m_ShowStart = true;
+					m_StartMenuTransition.m_Reverse = false;
+				}
+
+				m_StartMenuTransition.m_TargetPage = -1;
+			}
+		}
 		else if(m_ShowStart)
 		{
 			m_MenusStart.RenderStartMenu(Screen);
@@ -1068,27 +1269,13 @@ void CMenus::Render()
 			CUIRect TabBar, MainView;
 			Screen.HSplitTop(24.0f, &TabBar, &MainView);
 
-			if(m_MenuPage == PAGE_NEWS)
-			{
-				RenderNews(MainView);
-			}
-			else if(m_MenuPage >= PAGE_INTERNET && m_MenuPage <= PAGE_FAVORITE_COMMUNITY_5)
-			{
-				RenderServerbrowser(MainView);
-			}
-			else if(m_MenuPage == PAGE_DEMOS)
-			{
-				RenderDemoBrowser(MainView);
-			}
-			else if(m_MenuPage == PAGE_SETTINGS)
-			{
-				RenderSettings(MainView);
-			}
-			else
-			{
-				dbg_assert_failed("Invalid m_MenuPage: %d", m_MenuPage);
-			}
+			const CUIRect PageClip = MainView;
+			Ui()->ClipEnable(&PageClip);
+			MainView.x += PageAnimationOffset;
 
+			RenderAnimatedPage(m_MenuPageTransition, m_MenuPage, MainView, false);
+
+			Ui()->ClipDisable();
 			RenderMenubar(TabBar, ClientState);
 		}
 		break;
@@ -1103,44 +1290,13 @@ void CMenus::Render()
 			CUIRect TabBar, MainView;
 			Screen.HSplitTop(24.0f, &TabBar, &MainView);
 
-			if(m_GamePage == PAGE_GAME)
-			{
-				RenderGame(MainView);
-				RenderIngameHint();
-			}
-			else if(m_GamePage == PAGE_PLAYERS)
-			{
-				RenderPlayers(MainView);
-			}
-			else if(m_GamePage == PAGE_SERVER_INFO)
-			{
-				RenderServerInfo(MainView);
-			}
-			else if(m_GamePage == PAGE_NETWORK)
-			{
-				RenderInGameNetwork(MainView);
-			}
-			else if(m_GamePage == PAGE_GHOST)
-			{
-				RenderGhost(MainView);
-			}
-			else if(m_GamePage == PAGE_CALLVOTE)
-			{
-				RenderServerControl(MainView);
-			}
-			else if(m_GamePage == PAGE_DEMOS)
-			{
-				RenderDemoBrowser(MainView);
-			}
-			else if(m_GamePage == PAGE_SETTINGS)
-			{
-				RenderSettings(MainView);
-			}
-			else
-			{
-				dbg_assert_failed("Invalid m_GamePage: %d", m_GamePage);
-			}
+			const CUIRect PageClip = MainView;
+			Ui()->ClipEnable(&PageClip);
+			MainView.x += PageAnimationOffset;
 
+			RenderAnimatedPage(m_GamePageTransition, m_GamePage, MainView, true);
+
+			Ui()->ClipDisable();
 			RenderMenubar(TabBar, ClientState);
 		}
 		break;
@@ -1166,12 +1322,27 @@ void CMenus::Render()
 	}
 
 	// Handle this escape hotkey after popup menus
-	if(!m_ShowStart && ClientState == IClient::STATE_OFFLINE && Ui()->ConsumeHotkey(CUi::HOTKEY_ESCAPE))
+	if(!m_ShowStart && !m_StartMenuTransition.m_Active &&
+		!m_MenuPageTransition.m_Active &&
+		ClientState == IClient::STATE_OFFLINE &&
+		Ui()->ConsumeHotkey(CUi::HOTKEY_ESCAPE))
 	{
-		m_ShowStart = true;
+		if(g_Config.m_ClStartMenuAnimation &&
+			((m_MenuPage >= PAGE_INTERNET && m_MenuPage <= PAGE_FAVORITE_COMMUNITY_5) ||
+				m_MenuPage == PAGE_DEMOS ||
+				m_MenuPage == PAGE_SETTINGS))
+		{
+			m_StartMenuTransition.m_Active = true;
+			m_StartMenuTransition.m_Reverse = true;
+			m_StartMenuTransition.m_TargetPage = m_MenuPage;
+			m_StartMenuTransition.m_StartTime = time();
+		}
+		else
+		{
+			m_ShowStart = true;
+		}
 	}
 }
-
 void CMenus::RenderPopupFullscreen(CUIRect Screen)
 {
 	char aBuf[1536];
@@ -1225,11 +1396,6 @@ void CMenus::RenderPopupFullscreen(CUIRect Screen)
 		pTitle = Localize("Restart");
 		pExtraText = Localize("Are you sure that you want to restart?");
 	}
-	else if(m_Popup == POPUP_QUIT)
-	{
-		pTitle = Localize("Quit");
-		pExtraText = Localize("Are you sure that you want to quit?");
-	}
 	else if(m_Popup == POPUP_FIRST_LAUNCH)
 	{
 		pTitle = Localize("Welcome to DDNet");
@@ -1241,10 +1407,6 @@ void CMenus::RenderPopupFullscreen(CUIRect Screen)
 		pExtraText = aBuf;
 		pButtonText = Localize("Ok");
 		TopAlign = true;
-	}
-	else if(m_Popup == POPUP_JOIN_TUTORIAL)
-	{
-		pTitle = Localize("Joining Tutorial server");
 	}
 	else if(m_Popup == POPUP_POINTS)
 	{
@@ -1354,7 +1516,7 @@ void CMenus::RenderPopupFullscreen(CUIRect Screen)
 			}
 		}
 	}
-	else if(m_Popup == POPUP_QUIT || m_Popup == POPUP_RESTART)
+	else if(m_Popup == POPUP_RESTART)
 	{
 		CUIRect Yes, No;
 		Box.HSplitBottom(20.f, &Box, &Part);
@@ -2389,19 +2551,6 @@ void CMenus::OnRender()
 		PopupMessage(Localize("Disconnected"), Localize("The server is running a non-standard tuning on a pure game type."), Localize("Ok"));
 	}
 
-	if(!IsActive())
-	{
-		if(Ui()->ConsumeHotkey(CUi::HOTKEY_ESCAPE))
-		{
-			SetActive(true);
-		}
-		else if(Client()->State() != IClient::STATE_DEMOPLAYBACK)
-		{
-			Ui()->ClearHotkeys();
-			return;
-		}
-	}
-
 	Ui()->StartCheck();
 	UpdateColors();
 
@@ -2422,8 +2571,13 @@ void CMenus::OnRender()
 	if(g_Config.m_Debug)
 		Ui()->DebugRender(2.0f, Ui()->Screen()->h - 12.0f);
 
-	if(Ui()->ConsumeHotkey(CUi::HOTKEY_ESCAPE))
+	if(!m_StartMenuTransition.m_Active &&
+		!m_MenuPageTransition.m_Active &&
+		!m_GamePageTransition.m_Active &&
+		Ui()->ConsumeHotkey(CUi::HOTKEY_ESCAPE))
+	{
 		SetActive(false);
+	}
 
 	Ui()->FinishCheck();
 	Ui()->ClearHotkeys();
@@ -2570,8 +2724,26 @@ const CMenus::CMenuImage *CMenus::FindMenuImage(const char *pName)
 
 void CMenus::SetMenuPage(int NewPage)
 {
+	const bool StartMenuTransition = g_Config.m_ClStartMenuAnimation && m_ShowStart &&
+		((m_MenuPage >= PAGE_INTERNET && m_MenuPage <= PAGE_FAVORITE_COMMUNITY_5) ||
+			m_MenuPage == PAGE_DEMOS ||
+			m_MenuPage == PAGE_SETTINGS);
+
+	if(StartMenuTransition)
+	{
+		m_MenuPageTransition.m_Active = false;
+		m_MenuPageTransition.m_FromPage = NewPage;
+		m_MenuPageTransition.m_ToPage = NewPage;
+
+		m_StartMenuTransition.m_Active = true;
+		m_StartMenuTransition.m_Reverse = false;
+		m_StartMenuTransition.m_TargetPage = NewPage;
+		m_StartMenuTransition.m_StartTime = time();
+	}
+
 	const int OldPage = m_MenuPage;
 	m_MenuPage = NewPage;
+
 	if(NewPage >= PAGE_INTERNET && NewPage <= PAGE_FAVORITE_COMMUNITY_5)
 	{
 		g_Config.m_UiPage = NewPage;
@@ -2647,10 +2819,6 @@ void CMenus::SetShowStart(bool ShowStart)
 	m_ShowStart = ShowStart;
 }
 
-void CMenus::ShowQuitPopup()
-{
-	m_Popup = POPUP_QUIT;
-}
 
 void CMenus::JoinTutorial()
 {
@@ -2660,4 +2828,8 @@ void CMenus::JoinTutorial()
 	m_JoinTutorial.m_TriedRefresh = false;
 	m_JoinTutorial.m_LocalServerState = CJoinTutorial::ELocalServerState::NOT_TRIED;
 	m_JoinTutorial.m_StateChange = time_get_nanoseconds();
+}
+void CMenus::ShowQuitPopup()
+{
+	Client()->Quit();
 }

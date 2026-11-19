@@ -13,11 +13,50 @@
 #include <engine/graphics.h>
 #include <engine/shared/config.h>
 
+#include <game/client/animstate.h>
 #include <game/client/components/menu_background.h>
 #include <game/client/gameclient.h>
 #include <game/client/ui.h>
 #include <game/localization.h>
 #include <game/client/ui_listbox.h>
+static CScrollRegion s_ForceSkinPickerScroll;
+float CMenus::EaseTabSlide(float t, int Mode)
+{
+	t = std::clamp(t, 0.0f, 1.0f);
+	if(Mode == 1) // ease-out cubic
+	{
+		const float u = 1.0f - t;
+		return 1.0f - u * u * u;
+	}
+	if(Mode == 2) // ease-in-out cubic
+	{
+		if(t < 0.5f)
+			return 4.0f * t * t * t;
+		const float u = -2.0f * t + 2.0f;
+		return 1.0f - (u * u * u) * 0.5f;
+	}
+	if(Mode == 3) // ease-out bounce (Robert Penner)
+	{
+		constexpr float n1 = 7.5625f;
+		constexpr float d1 = 2.75f;
+		float x = t;
+		if(x < 1.0f / d1)
+			return n1 * x * x;
+		if(x < 2.0f / d1)
+		{
+			x -= 1.5f / d1;
+			return n1 * x * x + 0.75f;
+		}
+		if(x < 2.5f / d1)
+		{
+			x -= 2.25f / d1;
+			return n1 * x * x + 0.9375f;
+		}
+		x -= 2.625f / d1;
+		return n1 * x * x + 0.984375f;
+	}
+	return t; // linear
+}
 
 void CMenus::SetNeedSendInfo()
 {
@@ -27,9 +66,47 @@ void CMenus::SetNeedSendInfo()
 		m_NeedSendinfo = true;
 }
 
+void CMenus::SetMenuBackgroundForPage(int Page)
+{
+	int Pos = CMenuBackground::POS_SETTINGS_GENERAL;
+	switch(Page)
+	{
+	case SETTINGS_LANGUAGE: Pos = CMenuBackground::POS_SETTINGS_LANGUAGE; break;
+	case SETTINGS_GENERAL: Pos = CMenuBackground::POS_SETTINGS_GENERAL; break;
+	case SETTINGS_PLAYER: Pos = CMenuBackground::POS_SETTINGS_PLAYER; break;
+	case SETTINGS_TEE: Pos = CMenuBackground::POS_SETTINGS_TEE; break;
+	case SETTINGS_APPEARANCE: Pos = CMenuBackground::POS_SETTINGS_APPEARANCE; break;
+	case SETTINGS_CONTROLS: Pos = CMenuBackground::POS_SETTINGS_CONTROLS; break;
+	case SETTINGS_GRAPHICS: Pos = CMenuBackground::POS_SETTINGS_GRAPHICS; break;
+	case SETTINGS_SOUND: Pos = CMenuBackground::POS_SETTINGS_SOUND; break;
+	case SETTINGS_DDNET: Pos = CMenuBackground::POS_SETTINGS_DDNET; break;
+	case SETTINGS_ASSETS: Pos = CMenuBackground::POS_SETTINGS_ASSETS; break;
+	case SETTINGS_TESTCLIENT: Pos = CMenuBackground::POS_SETTINGS_ASSETS; break;
+	case SETTINGS_ANIMATIONS: Pos = CMenuBackground::POS_SETTINGS_ASSETS; break;
+	case SETTINGS_CREDITS: Pos = CMenuBackground::POS_SETTINGS_CREDITS; break;
+	}
+	GameClient()->m_MenuBackground.ChangePosition(Pos);
+}
+
+void CMenus::RenderSettingsTabContent(int Page, CUIRect View)
+{
+	if(Page == SETTINGS_LANGUAGE)        RenderLanguageSettings(View);
+	else if(Page == SETTINGS_GENERAL)    RenderSettingsGeneral(View);
+	else if(Page == SETTINGS_PLAYER)     RenderSettingsPlayer(View);
+	else if(Page == SETTINGS_TEE)        Client()->IsSixup() ? RenderSettingsTee7(View) : RenderSettingsTee(View);
+	else if(Page == SETTINGS_APPEARANCE) RenderSettingsAppearance(View);
+	else if(Page == SETTINGS_CONTROLS)   m_MenusSettingsControls.Render(View);
+	else if(Page == SETTINGS_GRAPHICS)   RenderSettingsGraphics(View);
+	else if(Page == SETTINGS_SOUND)      RenderSettingsSound(View);
+	else if(Page == SETTINGS_DDNET)      RenderSettingsDDNet(View);
+	else if(Page == SETTINGS_ASSETS)     RenderSettingsAssets(View);
+	else if(Page == SETTINGS_TESTCLIENT) RenderSettingsTestClient(View);
+	else if(Page == SETTINGS_ANIMATIONS) RenderSettingsAnimations(View);
+	else if(Page == SETTINGS_CREDITS)    RenderSettingsCredits(View);
+}
+
 void CMenus::RenderSettings(CUIRect MainView)
 {
-	// render background
 	CUIRect Button, TabBar, RestartBar;
 	MainView.VSplitRight(120.0f, &MainView, &TabBar);
 	MainView.Draw(ms_ColorTabbarActive, IGraphics::CORNER_B, 10.0f);
@@ -57,6 +134,7 @@ void CMenus::RenderSettings(CUIRect MainView)
 		Localize("DDNet"),
 		Localize("Assets"),
 		"Hydra Client",
+		Localize("Animations"),
 		Localize("Credits")};
 	static CButtonContainer s_aTabButtons[SETTINGS_LENGTH];
 
@@ -68,72 +146,82 @@ void CMenus::RenderSettings(CUIRect MainView)
 			g_Config.m_UiSettingsPage = i;
 	}
 
-	if(g_Config.m_UiSettingsPage == SETTINGS_LANGUAGE)
+	static int s_LastPage = -1;
+	if(s_LastPage < 0)
+		s_LastPage = g_Config.m_UiSettingsPage;
+
+	if(g_Config.m_UiSettingsPage != s_LastPage)
 	{
-		GameClient()->m_MenuBackground.ChangePosition(CMenuBackground::POS_SETTINGS_LANGUAGE);
-		RenderLanguageSettings(MainView);
+		if(g_Config.m_ClSettingsTabAnimation)
+		{
+			const int FromPage = m_SettingsPageAnim.m_Active ? m_SettingsPageAnim.m_ToPage : s_LastPage;
+			m_SettingsPageAnim.m_FromPage = FromPage;
+			m_SettingsPageAnim.m_ToPage = g_Config.m_UiSettingsPage;
+			m_SettingsPageAnim.m_StartTime = time();
+			m_SettingsPageAnim.m_Active = true;
+		}
+		s_LastPage = g_Config.m_UiSettingsPage;
 	}
-	else if(g_Config.m_UiSettingsPage == SETTINGS_GENERAL)
+
+	SetMenuBackgroundForPage(m_SettingsPageAnim.m_Active ? m_SettingsPageAnim.m_ToPage : g_Config.m_UiSettingsPage);
+
+	if(m_SettingsPageAnim.m_Active)
 	{
-		GameClient()->m_MenuBackground.ChangePosition(CMenuBackground::POS_SETTINGS_GENERAL);
-		RenderSettingsGeneral(MainView);
-	}
-	else if(g_Config.m_UiSettingsPage == SETTINGS_PLAYER)
-	{
-		GameClient()->m_MenuBackground.ChangePosition(CMenuBackground::POS_SETTINGS_PLAYER);
-		RenderSettingsPlayer(MainView);
-	}
-	else if(g_Config.m_UiSettingsPage == SETTINGS_TEE)
-	{
-		GameClient()->m_MenuBackground.ChangePosition(CMenuBackground::POS_SETTINGS_TEE);
-		if(Client()->IsSixup())
-			RenderSettingsTee7(MainView);
+		const float DurationSec = g_Config.m_ClSettingsTabAnimationDuration / 1000.0f;
+		float t = (time() - m_SettingsPageAnim.m_StartTime) / (float)time_freq() / DurationSec;
+
+		if(t >= 1.0f)
+		{
+			m_SettingsPageAnim.m_Active = false;
+			RenderSettingsTabContent(g_Config.m_UiSettingsPage, MainView);
+		}
 		else
-			RenderSettingsTee(MainView);
-	}
-	else if(g_Config.m_UiSettingsPage == SETTINGS_APPEARANCE)
-	{
-		GameClient()->m_MenuBackground.ChangePosition(CMenuBackground::POS_SETTINGS_APPEARANCE);
-		RenderSettingsAppearance(MainView);
-	}
-	else if(g_Config.m_UiSettingsPage == SETTINGS_CONTROLS)
-	{
-		GameClient()->m_MenuBackground.ChangePosition(CMenuBackground::POS_SETTINGS_CONTROLS);
-		m_MenusSettingsControls.Render(MainView);
-	}
-	else if(g_Config.m_UiSettingsPage == SETTINGS_GRAPHICS)
-	{
-		GameClient()->m_MenuBackground.ChangePosition(CMenuBackground::POS_SETTINGS_GRAPHICS);
-		RenderSettingsGraphics(MainView);
-	}
-	else if(g_Config.m_UiSettingsPage == SETTINGS_SOUND)
-	{
-		GameClient()->m_MenuBackground.ChangePosition(CMenuBackground::POS_SETTINGS_SOUND);
-		RenderSettingsSound(MainView);
-	}
-	else if(g_Config.m_UiSettingsPage == SETTINGS_DDNET)
-	{
-		GameClient()->m_MenuBackground.ChangePosition(CMenuBackground::POS_SETTINGS_DDNET);
-		RenderSettingsDDNet(MainView);
-	}
-	else if(g_Config.m_UiSettingsPage == SETTINGS_ASSETS)
-	{
-		GameClient()->m_MenuBackground.ChangePosition(CMenuBackground::POS_SETTINGS_ASSETS);
-		RenderSettingsAssets(MainView);
-	}
-	else if(g_Config.m_UiSettingsPage == SETTINGS_TESTCLIENT)
-	{
-		GameClient()->m_MenuBackground.ChangePosition(CMenuBackground::POS_SETTINGS_ASSETS);
-		RenderSettingsTestClient(MainView);
-	}
-	else if(g_Config.m_UiSettingsPage == SETTINGS_CREDITS)
-	{
-		GameClient()->m_MenuBackground.ChangePosition(CMenuBackground::POS_SETTINGS_CREDITS);
-		RenderSettingsCredits(MainView);
+		{
+			const float Eased = EaseTabSlide(t, g_Config.m_ClSettingsTabAnimationEasing);
+			const int Dir = (m_SettingsPageAnim.m_ToPage > m_SettingsPageAnim.m_FromPage) ? 1 : -1;
+			const float W = MainView.w;
+
+			{
+				CUIRect OldView = MainView;
+				OldView.x -= Dir * Eased * W;
+
+				const float X0 = std::max(MainView.x, OldView.x);
+				const float X1 = std::min(MainView.x + MainView.w, OldView.x + OldView.w);
+				if(X1 > X0)
+				{
+					CUIRect ClipRect = MainView;
+					ClipRect.x = X0;
+					ClipRect.w = X1 - X0;
+					Ui()->ClipEnable(&ClipRect);
+					Ui()->SetEnabled(false);
+					RenderSettingsTabContent(m_SettingsPageAnim.m_FromPage, OldView);
+					Ui()->SetEnabled(true);
+					Ui()->ClipDisable();
+				}
+			}
+
+			{
+				CUIRect NewView = MainView;
+				NewView.x += Dir * (1.0f - Eased) * W;
+
+				const float X0 = std::max(MainView.x, NewView.x);
+				const float X1 = std::min(MainView.x + MainView.w, NewView.x + NewView.w);
+				if(X1 > X0)
+				{
+					CUIRect ClipRect = MainView;
+					ClipRect.x = X0;
+					ClipRect.w = X1 - X0;
+
+					Ui()->ClipEnable(&ClipRect);
+					RenderSettingsTabContent(m_SettingsPageAnim.m_ToPage, NewView);
+					Ui()->ClipDisable();
+				}
+			}
+		}
 	}
 	else
 	{
-		dbg_assert_failed("ui_settings_page invalid");
+		RenderSettingsTabContent(g_Config.m_UiSettingsPage, MainView);
 	}
 
 	if(NeedRestart)
@@ -539,6 +627,16 @@ void CMenus::ResetTestClientSettings()
 	g_Config.m_ClDirRotationMode = 0;
 	g_Config.m_ClDirRotationSpeed = 100;
 	g_Config.m_ClDirRotationSwingAngle = 45;
+	g_Config.m_ClDirRotationStepAngle = 45;
+
+	// ---- Force skin ----
+	g_Config.m_ClForceSkinRandomColors = 0;
+	g_Config.m_ClForceSkinRandomColorSeed = 0;
+	g_Config.m_ClForceSkinMode = 0;
+	str_copy(g_Config.m_ClForceSkinName, "default", sizeof(g_Config.m_ClForceSkinName));
+	g_Config.m_ClForceSkinRandomSeed = 0;
+	g_Config.m_ClForceSkinExcludeLocal = 1;
+	g_Config.m_ClForceSkinUseMyColors = 0;
 	g_Config.m_ClDirRotationOwn = 1;
 	g_Config.m_ClDirRotationDummy = 1;
 	g_Config.m_ClDirRotationExtra = 1;
@@ -948,6 +1046,149 @@ void CMenus::DrawTrailPreview(CUIRect Rect, int Group)
 
 	Graphics()->SetColor(1.0f, 1.0f, 1.0f, 1.0f);
 }
+void CMenus::DoForceSkinPicker(CUIRect View)
+{
+	auto &SkinList = GameClient()->m_Skins.SkinList();
+	if(SkinList.Skins().empty())
+		SkinList.ForceRefresh();
+
+	// Search row (fixed, outside scroll)
+	CUIRect SearchLabel, SearchRow;
+	View.HSplitTop(22.0f, &SearchRow, &View);
+	View.HSplitTop(8.0f, nullptr, &View);
+	static char s_aSearch[64] = "";
+	static CLineInput s_Search(s_aSearch, sizeof(s_aSearch));
+	s_Search.SetEmptyText(Localize("Search skins..."));
+	SearchRow.VSplitLeft(60.0f, &SearchLabel, &SearchRow);
+	Ui()->DoLabel(&SearchLabel, Localize("Search:"), 12.0f, TEXTALIGN_ML);
+	Ui()->DoEditBox(&s_Search, &SearchRow, 12.0f);
+
+	// Filter
+	std::vector<CSkins::CSkinListEntry *> vFiltered;
+	vFiltered.reserve(SkinList.Skins().size());
+	for(auto &Entry : SkinList.Skins())
+	{
+		const CSkins::CSkinContainer *pC = Entry.SkinContainer();
+		if(pC == nullptr)
+			continue;
+		if(s_aSearch[0] != '\0' && str_find_nocase(pC->Name(), s_aSearch) == nullptr)
+			continue;
+		vFiltered.push_back(&Entry);
+	}
+
+	// Background for the grid area only (search stays above, outside scroll)
+	View.Draw(ColorRGBA(0.05f, 0.05f, 0.05f, 0.5f), IGraphics::CORNER_ALL, 5.0f);
+	View.Margin(4.0f, &View);
+
+	// Native CScrollRegion; но колесо гейтится — регион реагирует,
+	// только если мышь над ним. Иначе колесо уходит внешнему скроллу.
+	CScrollRegion &s_PickerScroll = s_ForceSkinPickerScroll;
+	CScrollRegionParams ScrollParams;
+	ScrollParams.m_ScrollUnit = 40.0f;
+	s_PickerScroll.Begin(&View, &ScrollParams);
+
+	const float CellW = 80.0f;
+	const float CellH = 104.0f;
+	const float CellGap = 4.0f;
+	const int PerRow = std::max(1, (int)((View.w + CellGap) / (CellW + CellGap)));
+	const int NumRows = ((int)vFiltered.size() + PerRow - 1) / PerRow;
+
+	CUIRect Content = View;
+	Content.h = std::max(View.h, NumRows * (CellH + CellGap));
+	s_PickerScroll.AddRect(Content);
+
+	for(size_t idx = 0; idx < vFiltered.size(); ++idx)
+	{
+		CSkins::CSkinListEntry *pEntry = vFiltered[idx];
+		const CSkins::CSkinContainer *pC = pEntry->SkinContainer();
+		const char *pName = pC->Name();
+
+		const int Col = (int)idx % PerRow;
+		const int Row = (int)idx / PerRow;
+
+		CUIRect Cell;
+		Cell.x = Content.x + Col * (CellW + CellGap);
+		Cell.y = Content.y + Row * (CellH + CellGap);
+		Cell.w = CellW;
+		Cell.h = CellH;
+
+		const bool Active = str_comp(g_Config.m_ClForceSkinName, pName) == 0;
+		pEntry->RequestLoad();
+
+		Cell.Draw(Active ? ColorRGBA(0.20f, 0.45f, 0.85f, 0.75f) : ColorRGBA(0.12f, 0.12f, 0.12f, 0.75f),
+			IGraphics::CORNER_ALL, 4.0f);
+
+		CUIRect Preview = Cell;
+		Preview.HSplitTop(CellH - 18.0f, &Preview, nullptr);
+		Preview.Margin(6.0f, &Preview);
+
+		const std::unique_ptr<CSkin> &pSkinPtr = pC->Skin();
+		if(pSkinPtr)
+		{
+			CTeeRenderInfo Info;
+			Info.m_aSixup[g_Config.m_ClDummy].Reset();
+			Info.Apply(pSkinPtr.get());
+			Info.m_Size = Preview.h;
+
+			if(g_Config.m_ClForceSkinUseMyColors)
+			{
+				constexpr float DarkestLight = 0.5f;
+				ColorHSLA BodyHsl = ColorHSLA(g_Config.m_ClPlayerColorBody == 0 ? 65408u : (unsigned int)g_Config.m_ClPlayerColorBody);
+				ColorHSLA FeetHsl = ColorHSLA(g_Config.m_ClPlayerColorFeet == 0 ? 65408u : (unsigned int)g_Config.m_ClPlayerColorFeet);
+				BodyHsl = BodyHsl.UnclampLighting(DarkestLight);
+				FeetHsl = FeetHsl.UnclampLighting(DarkestLight);
+				BodyHsl.a = 1.0f;
+				FeetHsl.a = 1.0f;
+				Info.m_CustomColoredSkin = true;
+				Info.m_ColorBody = color_cast<ColorRGBA>(BodyHsl);
+				Info.m_ColorFeet = color_cast<ColorRGBA>(FeetHsl);
+			}
+			else if(g_Config.m_ClForceSkinRandomColors)
+			{
+				constexpr float DarkestLight = 0.5f;
+				const uint32_t ColorSeed = (uint32_t)g_Config.m_ClForceSkinRandomColorSeed;
+				const uint32_t ColorHash = ColorSeed * 2246822519u + 0x9E3779B9u;
+				const float Hue = (float)((ColorHash >> 16) & 0xFFFF) / 65535.0f;
+				const float Sat = 0.65f + ((ColorHash >> 8) & 0xFF) / 255.0f * 0.35f;
+				const float LhtRaw = 0.35f + (ColorHash & 0xFF) / 255.0f * 0.35f;
+				const float FeetHue = fmodf(Hue + 0.5f, 1.0f);
+				ColorHSLA BodyHsl(Hue, Sat, LhtRaw);
+				ColorHSLA FeetHsl(FeetHue, Sat, LhtRaw);
+				BodyHsl = BodyHsl.UnclampLighting(DarkestLight);
+				FeetHsl = FeetHsl.UnclampLighting(DarkestLight);
+				BodyHsl.a = 1.0f;
+				FeetHsl.a = 1.0f;
+				Info.m_CustomColoredSkin = true;
+				Info.m_ColorBody = color_cast<ColorRGBA>(BodyHsl);
+				Info.m_ColorFeet = color_cast<ColorRGBA>(FeetHsl);
+			}
+
+			RenderTools()->RenderTee(CAnimState::GetIdle(), &Info, EMOTE_NORMAL, vec2(1.0f, 0.0f), Preview.Center());
+		}
+		else
+		{
+			Ui()->DoLabel(&Preview, "...", 20.0f, TEXTALIGN_MC);
+		}
+
+		CUIRect Name = Cell;
+		Name.HSplitBottom(18.0f, nullptr, &Name);
+		TextRender()->TextColor(Active ? ColorRGBA(0.5f, 0.85f, 1.0f, 1.0f) : TextRender()->DefaultTextColor());
+		Ui()->DoLabel(&Name, pName, 10.0f, TEXTALIGN_MC);
+		TextRender()->TextColor(TextRender()->DefaultTextColor());
+
+		const bool Hovered = Ui()->MouseInside(&Cell);
+		if(Hovered && Ui()->MouseButtonClicked(0))
+			str_copy(g_Config.m_ClForceSkinName, pName);
+	}
+
+	if(vFiltered.empty())
+	{
+		CUIRect Center = View;
+		Ui()->DoLabel(&Center, Localize("No matching skins"), 12.0f, TEXTALIGN_MC);
+	}
+
+	s_PickerScroll.End();
+}
 void CMenus::RenderSettingsTestClient(CUIRect MainView)
 {
 	CUIRect Label, Button, Left, Right, Middle;
@@ -960,7 +1201,8 @@ void CMenus::RenderSettingsTestClient(CUIRect MainView)
 		TESTCLIENT_TAB_WEATHER = 3,
 		TESTCLIENT_TAB_TEE_ROTATION = 4,
 		TESTCLIENT_TAB_DIRECTION_ROTATION = 5,
-		NUMBER_OF_TESTCLIENT_TABS = 6,
+		TESTCLIENT_TAB_FORCE_SKIN = 6,
+		NUMBER_OF_TESTCLIENT_TABS = 7,
 	};
 	static int s_CurTab = TESTCLIENT_TAB_GENERAL;
 
@@ -996,8 +1238,9 @@ void CMenus::RenderSettingsTestClient(CUIRect MainView)
 			Localize("Trail"),
 			Localize("Weather"),
 			Localize("Tee Rotation"),
-			Localize("Direction Rotation")};
-		static_assert(NUMBER_OF_TESTCLIENT_TABS == 6, "apTabNames must have 6 entries");
+			Localize("Direction Rotation"),
+			Localize("Force Skin")};
+		static_assert(NUMBER_OF_TESTCLIENT_TABS == 7, "apTabNames must have 7 entries");
 		for(int Tab = 0; Tab < NUMBER_OF_TESTCLIENT_TABS; ++Tab)
 		{
 			TabBar.VSplitLeft(TabWidth, &Button, &TabBar);
@@ -1541,24 +1784,35 @@ void CMenus::RenderSettingsTestClient(CUIRect MainView)
 
 		Left.HSplitTop(LineSize, &Row, &Left);
 		Ui()->DoScrollbarOption(&g_Config.m_ClDirRotationSpeed, &g_Config.m_ClDirRotationSpeed, &Row,
-			Localize("Speed"), 1, 500, &CUi::ms_LogarithmicScrollbarScale, 0u, "%");
-
-		static CButtonContainer s_aDirModeButtons[2];
+			Localize("Speed"), 1, 1000, &CUi::ms_LogarithmicScrollbarScale, 0u, "%");
+		static CButtonContainer s_aDirModeButtons[4];
 		Left.HSplitTop(LineSize, &Row, &Left);
 		{
-			CUIRect ModeLinear, ModeSwing;
-			Row.VSplitMid(&ModeLinear, &ModeSwing);
+			CUIRect ModeLinear, ModeSwing, ModeLoading, ModeStep;
+			Row.VSplitLeft(Row.w / 4.0f, &ModeLinear, &Row);
+			Row.VSplitLeft(Row.w / 3.0f, &ModeSwing, &Row);
+			Row.VSplitMid(&ModeLoading, &ModeStep);
 			if(DoButton_CheckBox(&s_aDirModeButtons[0], Localize("Linear"), g_Config.m_ClDirRotationMode == 0, &ModeLinear))
 				g_Config.m_ClDirRotationMode = 0;
 			if(DoButton_CheckBox(&s_aDirModeButtons[1], Localize("Swing"), g_Config.m_ClDirRotationMode == 1, &ModeSwing))
 				g_Config.m_ClDirRotationMode = 1;
+			if(DoButton_CheckBox(&s_aDirModeButtons[2], Localize("Loading"), g_Config.m_ClDirRotationMode == 2, &ModeLoading))
+				g_Config.m_ClDirRotationMode = 2;
+			if(DoButton_CheckBox(&s_aDirModeButtons[3], Localize("Step"), g_Config.m_ClDirRotationMode == 3, &ModeStep))
+				g_Config.m_ClDirRotationMode = 3;
 		}
 
 		if(g_Config.m_ClDirRotationMode == 1)
 		{
 			Left.HSplitTop(LineSize, &Row, &Left);
 			Ui()->DoScrollbarOption(&g_Config.m_ClDirRotationSwingAngle, &g_Config.m_ClDirRotationSwingAngle,
-				&Row, Localize("Swing angle"), 0, 180, &CUi::ms_LinearScrollbarScale, 0u, "°");
+				&Row, Localize("Swing angle"), 0, 1800, &CUi::ms_LinearScrollbarScale, 0u, "°");
+		}
+		else if(g_Config.m_ClDirRotationMode == 3)
+		{
+			Left.HSplitTop(LineSize, &Row, &Left);
+			Ui()->DoScrollbarOption(&g_Config.m_ClDirRotationStepAngle, &g_Config.m_ClDirRotationStepAngle,
+				&Row, Localize("Step angle"), 1, 360, &CUi::ms_LinearScrollbarScale, 0u, "°");
 		}
 
 		Left.HSplitTop(MarginSmall, nullptr, &Left);
@@ -1576,6 +1830,204 @@ void CMenus::RenderSettingsTestClient(CUIRect MainView)
 		s_DirRotationScrollRegion.AddRect(UsedRect);
 
 		s_DirRotationScrollRegion.End();
+		return;
+	}
+
+	// ***** Force Skin tab ***** //
+	if(s_CurTab == TESTCLIENT_TAB_FORCE_SKIN)
+	{
+		const float LineSize = 20.0f;
+		const float HeadlineFontSize = 20.0f;
+		const float HeadlineHeight = 30.0f;
+		const float MarginSmall = 5.0f;
+
+		// Прямоугольник пикера от прошлого кадра — для гейта колеса.
+		static CUIRect s_LastPickerRect = {0, 0, 0, 0};
+		static bool s_LastPickerActive = false;
+		const bool WheelOverPicker = s_LastPickerActive && Ui()->MouseInside(&s_LastPickerRect);
+
+		// OuterClip = до Begin (Begin сдвинет MainView.y на -ScrollY).
+		// Нужен, чтобы восстановить клип после вложенного CScrollRegion пикера.
+		const CUIRect OuterClip = MainView;
+
+		static CScrollRegion s_ForceSkinScrollRegion;
+		CScrollRegionParams ForceSkinScrollParams;
+		// 0 → регион не реагирует на колесо, когда мышь над пикером.
+		ForceSkinScrollParams.m_ScrollUnit = WheelOverPicker ? 0.0f : 60.0f;
+		s_ForceSkinScrollRegion.Begin(&MainView, &ForceSkinScrollParams);
+		const float StartY = MainView.y;
+
+		CUIRect Left, Row;
+		MainView.VSplitMid(&Left, nullptr, 20.0f);
+
+		s_LastPickerActive = false;
+
+		{
+			CUIRect TitleRect;
+			Left.HSplitTop(HeadlineHeight, &TitleRect, &Left);
+			Ui()->DoLabel(&TitleRect, Localize("Force Skin"), HeadlineFontSize, TEXTALIGN_ML);
+		}
+		Left.HSplitTop(10.0f, nullptr, &Left);
+
+		// Mode
+		static CButtonContainer s_aModeButtons[4];
+		Left.HSplitTop(LineSize, &Row, &Left);
+		{
+			CUIRect ModeOff, ModeMy, ModeCustom, ModeRandom;
+			Row.VSplitLeft(Row.w / 4.0f, &ModeOff, &Row);
+			Row.VSplitLeft(Row.w / 3.0f, &ModeMy, &Row);
+			Row.VSplitMid(&ModeCustom, &ModeRandom);
+			if(DoButton_CheckBox(&s_aModeButtons[0], Localize("Off"), g_Config.m_ClForceSkinMode == 0, &ModeOff))
+				g_Config.m_ClForceSkinMode = 0;
+			if(DoButton_CheckBox(&s_aModeButtons[1], Localize("My Skin"), g_Config.m_ClForceSkinMode == 1, &ModeMy))
+				g_Config.m_ClForceSkinMode = 1;
+			if(DoButton_CheckBox(&s_aModeButtons[2], Localize("Custom"), g_Config.m_ClForceSkinMode == 2, &ModeCustom))
+				g_Config.m_ClForceSkinMode = 2;
+			if(DoButton_CheckBox(&s_aModeButtons[3], Localize("Random"), g_Config.m_ClForceSkinMode == 3, &ModeRandom))
+				g_Config.m_ClForceSkinMode = 3;
+		}
+
+		// Custom: skin name + пикер (фикс 280px)
+		if(g_Config.m_ClForceSkinMode == 2)
+		{
+			Left.HSplitTop(10.0f, nullptr, &Left);
+			Left.HSplitTop(LineSize, &Row, &Left);
+			CUIRect Label, Input, UseMineBtn;
+			Row.VSplitLeft(110.0f, &Label, &Input);
+			Input.VSplitRight(180.0f, &Input, &UseMineBtn);
+			Input.VSplitRight(6.0f, &Input, nullptr);
+			Ui()->DoLabel(&Label, Localize("Skin name:"), 14.0f, TEXTALIGN_ML);
+			static CLineInput s_SkinNameInput(g_Config.m_ClForceSkinName, sizeof(g_Config.m_ClForceSkinName));
+			s_SkinNameInput.SetEmptyText("default");
+			Ui()->DoEditBox(&s_SkinNameInput, &Input, 12.0f);
+
+			static CButtonContainer s_UseMineBtn;
+			if(DoButton_Menu(&s_UseMineBtn, Localize("Use my current skin"), 0, &UseMineBtn))
+				str_copy(g_Config.m_ClForceSkinName, g_Config.m_ClPlayerSkin);
+
+			Left.HSplitTop(10.0f, nullptr, &Left);
+			CUIRect Picker;
+			Left.HSplitTop(280.0f, &Picker, &Left);   // фиксированная высота
+			DoForceSkinPicker(Picker);
+
+			// Запомнить rect для гейта колеса на следующем кадре.
+			s_LastPickerRect = Picker;
+			s_LastPickerActive = true;
+
+			// CScrollRegion::End() пикера вызвал ClipDisable() — вернуть клип таба,
+			// иначе элементы ниже рисуются за пределами MainView.
+			Ui()->ClipEnable(&OuterClip);
+
+			Left.HSplitTop(10.0f, nullptr, &Left);
+		}
+
+		// Random: seed + reroll
+		if(g_Config.m_ClForceSkinMode == 3)
+		{
+			Left.HSplitTop(MarginSmall, nullptr, &Left);
+			Left.HSplitTop(LineSize, &Row, &Left);
+			Ui()->DoScrollbarOption(&g_Config.m_ClForceSkinRandomSeed, &g_Config.m_ClForceSkinRandomSeed, &Row,
+				Localize("Random seed"), 0, 1000000, &CUi::ms_LinearScrollbarScale, 0u);
+
+			Left.HSplitTop(16.0f, &Row, &Left);
+			TextRender()->TextColor(0.7f, 0.7f, 0.7f, 1.0f);
+			Ui()->DoLabel(&Row, Localize("0 = stable base distribution (click Reroll to shuffle)"), 11.0f, TEXTALIGN_ML);
+			TextRender()->TextColor(TextRender()->DefaultTextColor());
+
+			Left.HSplitTop(LineSize, &Row, &Left);
+			static CButtonContainer s_RerollBtn;
+			if(DoButton_Menu(&s_RerollBtn, Localize("Reroll (new random skins)"), 0, &Row))
+				g_Config.m_ClForceSkinRandomSeed = rand() % 1000000 + 1;
+
+			Left.HSplitTop(MarginSmall, nullptr, &Left);
+			Left.HSplitTop(16.0f, &Row, &Left);
+			Ui()->DoLabel(&Row, Localize("Each player gets a different skin based on their ID + seed."), 12.0f, TEXTALIGN_ML);
+		}
+
+		// Exclude own tee
+		Left.HSplitTop(MarginSmall, nullptr, &Left);
+		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_ClForceSkinExcludeLocal, Localize("Do not affect my own tee"), &g_Config.m_ClForceSkinExcludeLocal, &Left, LineSize);
+
+		// Color mode
+		if(g_Config.m_ClForceSkinMode != 0)
+		{
+			Left.HSplitTop(MarginSmall, nullptr, &Left);
+			Left.HSplitTop(LineSize, &Row, &Left);
+			CUIRect ModeSkin, ModeMy, ModeRandom;
+			Row.VSplitLeft(Row.w / 3.0f, &ModeSkin, &Row);
+			Row.VSplitMid(&ModeMy, &ModeRandom);
+			static CButtonContainer s_aColorModeButtons[3];
+
+			if(DoButton_CheckBox(&s_aColorModeButtons[0], Localize("Skin's own color"),
+					!g_Config.m_ClForceSkinUseMyColors && !g_Config.m_ClForceSkinRandomColors, &ModeSkin))
+			{
+				g_Config.m_ClForceSkinUseMyColors = 0;
+				g_Config.m_ClForceSkinRandomColors = 0;
+			}
+			if(DoButton_CheckBox(&s_aColorModeButtons[1], Localize("My colors"),
+					g_Config.m_ClForceSkinUseMyColors, &ModeMy))
+			{
+				g_Config.m_ClForceSkinUseMyColors = 1;
+				g_Config.m_ClForceSkinRandomColors = 0;
+			}
+			if(DoButton_CheckBox(&s_aColorModeButtons[2], Localize("Random"),
+					g_Config.m_ClForceSkinRandomColors, &ModeRandom))
+			{
+				g_Config.m_ClForceSkinUseMyColors = 0;
+				g_Config.m_ClForceSkinRandomColors = 1;
+			}
+
+			{
+				CUIRect DescRect;
+				Left.HSplitTop(LineSize, &DescRect, &Left);
+				TextRender()->TextColor(0.7f, 0.7f, 0.7f, 1.0f);
+				Ui()->DoLabel(&DescRect, Localize("Color is applied per-part (body / feet) for all forced skins"), 11.0f, TEXTALIGN_ML);
+				TextRender()->TextColor(TextRender()->DefaultTextColor());
+			}
+
+			if(g_Config.m_ClForceSkinUseMyColors &&
+				g_Config.m_ClPlayerColorBody == 0 && g_Config.m_ClPlayerColorFeet == 0)
+			{
+				Left.HSplitTop(LineSize, &Row, &Left);
+				TextRender()->TextColor(1.0f, 0.6f, 0.4f, 1.0f);
+				Ui()->DoLabel(&Row, Localize("Set your body/feet colors in the Tee tab first!"), 12.0f, TEXTALIGN_ML);
+				TextRender()->TextColor(TextRender()->DefaultTextColor());
+			}
+
+			if(g_Config.m_ClForceSkinRandomColors)
+			{
+				Left.HSplitTop(MarginSmall, nullptr, &Left);
+				Left.HSplitTop(LineSize, &Row, &Left);
+				Ui()->DoScrollbarOption(&g_Config.m_ClForceSkinRandomColorSeed, &g_Config.m_ClForceSkinRandomColorSeed, &Row,
+					Localize("Color seed"), 0, 1000000, &CUi::ms_LinearScrollbarScale, 0u);
+
+				Left.HSplitTop(LineSize, &Row, &Left);
+				static CButtonContainer s_RerollColorsBtn;
+				if(DoButton_Menu(&s_RerollColorsBtn, Localize("Reroll colors"), 0, &Row))
+					g_Config.m_ClForceSkinRandomColorSeed = rand() % 1000000 + 1;
+
+				Left.HSplitTop(16.0f, &Row, &Left);
+				TextRender()->TextColor(0.7f, 0.7f, 0.7f, 1.0f);
+				Ui()->DoLabel(&Row, Localize("0 = stable base palette, other = shuffled palette"), 11.0f, TEXTALIGN_ML);
+				TextRender()->TextColor(TextRender()->DefaultTextColor());
+			}
+		}
+
+		// Регистрируем полную высоту контента для CScrollRegion.
+		// AddRect можно вызывать один раз — скроллбар покажется со следующего кадра,
+		// это невидимо глазу (первый кадр static-высоты = 0).
+		CUIRect UsedRect;
+		UsedRect.x = MainView.x;
+		UsedRect.w = MainView.w;
+		UsedRect.y = StartY;
+		UsedRect.h = Left.y - StartY + 10.0f;
+		s_ForceSkinScrollRegion.AddRect(UsedRect);
+
+		s_ForceSkinScrollRegion.End();
+
+		if(s_LastPickerActive && Ui()->MouseInside(&s_LastPickerRect))
+			Ui()->SetHotScrollRegion(&s_ForceSkinPickerScroll);
+
 		return;
 	}
 	// Создаем область прокрутки для всей страницы
@@ -1882,4 +2334,128 @@ void CMenus::RenderSettingsTestClient(CUIRect MainView)
 
 	// Завершаем работу скролла
 	s_ScrollRegion.End();
+}
+
+void CMenus::RenderSettingsAnimations(CUIRect MainView)
+{
+	static CScrollRegion s_Scroll;
+	CScrollRegionParams Params;
+	Params.m_ScrollUnit = 60.0f;
+	s_Scroll.Begin(&MainView, &Params);
+	const float StartY = MainView.y;
+
+	const float LineSize = 20.0f;
+	const float HeadlineFontSize = 20.0f;
+	const float HeadlineHeight = 30.0f;
+	const float MarginSmall = 5.0f;
+
+	CUIRect Left, Row;
+	MainView.VSplitMid(&Left, nullptr, 20.0f);
+
+	auto RenderEasing = [&](int *pEasing, CButtonContainer *pButtons) {
+		Left.HSplitTop(LineSize, &Row, &Left);
+		CUIRect ELinear, EOut, EInOut, EBounce;
+		Row.VSplitLeft(Row.w / 4.0f, &ELinear, &Row);
+		Row.VSplitLeft(Row.w / 3.0f, &EOut, &Row);
+		Row.VSplitMid(&EInOut, &EBounce);
+
+		if(DoButton_CheckBox(&pButtons[0], Localize("Linear"), *pEasing == 0, &ELinear))
+			*pEasing = 0;
+		if(DoButton_CheckBox(&pButtons[1], Localize("Ease-Out"), *pEasing == 1, &EOut))
+			*pEasing = 1;
+		if(DoButton_CheckBox(&pButtons[2], Localize("Ease-In-Out"), *pEasing == 2, &EInOut))
+			*pEasing = 2;
+		if(DoButton_CheckBox(&pButtons[3], Localize("Bounce"), *pEasing == 3, &EBounce))
+			*pEasing = 3;
+	};
+
+	auto RenderPreview = [&](bool Vertical, int DurationMs, int Easing) {
+		CUIRect PreviewRect;
+		Left.HSplitTop(110.0f, &PreviewRect, &Left);
+		PreviewRect.Draw(ColorRGBA(0.08f, 0.08f, 0.10f, 0.9f), IGraphics::CORNER_ALL, 5.0f);
+
+		CUIRect Inner = PreviewRect;
+		Inner.Margin(10.0f, &Inner);
+		const float DurationSec = std::max(0.05f, DurationMs / 1000.0f);
+		const float LoopDur = DurationSec * 2.0f;
+		static const int64_t s_Start = time();
+		const float TT = fmodf((time() - s_Start) / (float)time_freq(), LoopDur);
+		const bool Forward = TT < DurationSec;
+		float Progress = Forward ? TT / DurationSec : (TT - DurationSec) / DurationSec;
+		Progress = std::clamp(Progress, 0.0f, 1.0f);
+		const float Eased = EaseTabSlide(Progress, Easing);
+		const float Distance = Vertical ? Inner.h : Inner.w;
+		const float Offset = Forward ? 1.0f : -1.0f;
+
+		CUIRect OldBox = Inner;
+		CUIRect NewBox = Inner;
+		if(Vertical)
+		{
+			OldBox.y -= Offset * Eased * Distance;
+			NewBox.y += Offset * (1.0f - Eased) * Distance;
+		}
+		else
+		{
+			OldBox.x -= Offset * Eased * Distance;
+			NewBox.x += Offset * (1.0f - Eased) * Distance;
+		}
+
+		Ui()->ClipEnable(&Inner);
+		OldBox.Draw(ColorRGBA(0.30f, 0.50f, 0.85f, 0.85f), IGraphics::CORNER_ALL, 6.0f);
+		NewBox.Draw(ColorRGBA(0.85f, 0.50f, 0.30f, 0.85f), IGraphics::CORNER_ALL, 6.0f);
+		Ui()->ClipDisable();
+	};
+
+	{
+		CUIRect Title;
+		Left.HSplitTop(HeadlineHeight, &Title, &Left);
+		Ui()->DoLabel(&Title, Localize("Start Menu Transition"), HeadlineFontSize, TEXTALIGN_ML);
+	}
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_ClStartMenuAnimation,
+		Localize("Enable start menu transition"), &g_Config.m_ClStartMenuAnimation, &Left, LineSize);
+
+	if(g_Config.m_ClStartMenuAnimation)
+	{
+		Left.HSplitTop(MarginSmall, nullptr, &Left);
+		RenderPreview(true, g_Config.m_ClStartMenuAnimationDuration, g_Config.m_ClStartMenuAnimationEasing);
+
+		Left.HSplitTop(MarginSmall, nullptr, &Left);
+		Left.HSplitTop(LineSize, &Row, &Left);
+		Ui()->DoScrollbarOption(&g_Config.m_ClStartMenuAnimationDuration,
+			&g_Config.m_ClStartMenuAnimationDuration, &Row, Localize("Duration (ms)"), 100, 1500);
+
+		Left.HSplitTop(MarginSmall, nullptr, &Left);
+		static CButtonContainer s_aStartMenuEasing[4];
+		RenderEasing(&g_Config.m_ClStartMenuAnimationEasing, s_aStartMenuEasing);
+	}
+
+	Left.HSplitTop(20.0f, nullptr, &Left);
+	{
+		CUIRect Title;
+		Left.HSplitTop(HeadlineHeight, &Title, &Left);
+		Ui()->DoLabel(&Title, Localize("Page Transitions"), HeadlineFontSize, TEXTALIGN_ML);
+	}
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_ClSettingsTabAnimation,
+		Localize("Enable page transitions"), &g_Config.m_ClSettingsTabAnimation, &Left, LineSize);
+
+	if(g_Config.m_ClSettingsTabAnimation)
+	{
+		Left.HSplitTop(MarginSmall, nullptr, &Left);
+		RenderPreview(false, g_Config.m_ClSettingsTabAnimationDuration, g_Config.m_ClSettingsTabAnimationEasing);
+
+		Left.HSplitTop(MarginSmall, nullptr, &Left);
+		Left.HSplitTop(LineSize, &Row, &Left);
+		Ui()->DoScrollbarOption(&g_Config.m_ClSettingsTabAnimationDuration,
+			&g_Config.m_ClSettingsTabAnimationDuration, &Row, Localize("Duration (ms)"), 50, 3000);
+
+		Left.HSplitTop(MarginSmall, nullptr, &Left);
+		static CButtonContainer s_aPageEasing[4];
+		RenderEasing(&g_Config.m_ClSettingsTabAnimationEasing, s_aPageEasing);
+	}
+
+	CUIRect UsedRect = MainView;
+	UsedRect.y = StartY;
+	UsedRect.h = Left.y - StartY + 10.0f;
+	s_Scroll.AddRect(UsedRect);
+	s_Scroll.End();
 }
