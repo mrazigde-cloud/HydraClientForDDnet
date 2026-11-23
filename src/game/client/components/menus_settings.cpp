@@ -19,6 +19,11 @@
 #include <game/client/ui.h>
 #include <game/localization.h>
 #include <game/client/ui_listbox.h>
+
+#include <base/io.h>
+#include <engine/storage.h>
+
+#include <cstdlib>
 static CScrollRegion s_ForceSkinPickerScroll;
 float CMenus::EaseTabSlide(float t, int Mode)
 {
@@ -82,6 +87,7 @@ void CMenus::SetMenuBackgroundForPage(int Page)
 	case SETTINGS_DDNET: Pos = CMenuBackground::POS_SETTINGS_DDNET; break;
 	case SETTINGS_ASSETS: Pos = CMenuBackground::POS_SETTINGS_ASSETS; break;
 	case SETTINGS_TESTCLIENT: Pos = CMenuBackground::POS_SETTINGS_ASSETS; break;
+	case SETTINGS_PROFILES: Pos = CMenuBackground::POS_SETTINGS_TEE; break;
 	case SETTINGS_ANIMATIONS: Pos = CMenuBackground::POS_SETTINGS_ASSETS; break;
 	case SETTINGS_CREDITS: Pos = CMenuBackground::POS_SETTINGS_CREDITS; break;
 	}
@@ -101,6 +107,7 @@ void CMenus::RenderSettingsTabContent(int Page, CUIRect View)
 	else if(Page == SETTINGS_DDNET)      RenderSettingsDDNet(View);
 	else if(Page == SETTINGS_ASSETS)     RenderSettingsAssets(View);
 	else if(Page == SETTINGS_TESTCLIENT) RenderSettingsTestClient(View);
+	else if(Page == SETTINGS_PROFILES)   RenderSettingsProfiles(View);
 	else if(Page == SETTINGS_ANIMATIONS) RenderSettingsAnimations(View);
 	else if(Page == SETTINGS_CREDITS)    RenderSettingsCredits(View);
 }
@@ -134,6 +141,7 @@ void CMenus::RenderSettings(CUIRect MainView)
 		Localize("DDNet"),
 		Localize("Assets"),
 		"Hydra Client",
+		Localize("Profiles"),
 		Localize("Animations"),
 		Localize("Credits")};
 	static CButtonContainer s_aTabButtons[SETTINGS_LENGTH];
@@ -609,7 +617,14 @@ void CMenus::ResetTestClientSettings()
 	g_Config.m_ClTestClientEmoteCustom6 = 0;
 	g_Config.m_ClTestClientEmoteCustom7 = 0;
 	g_Config.m_ClTestClientEmoteCustom8 = 0;
-
+	// ---- Scroll ----
+	g_Config.m_ClTouchScrollSmooth = 2;
+	g_Config.m_ClScrollInertiaStrength = 100;
+	g_Config.m_ClScrollInertiaDecay = 100;
+	g_Config.m_ClScrollInertiaSpeed = 100;
+	g_Config.m_ClScrollMouseThreshold = 50;
+	g_Config.m_ClScrollDragThreshold = 10;
+	g_Config.m_ClWheelScrollAmount = 60;
 	// ---- Extra ----
 	g_Config.m_ClExtraAutoSwitch = 1;
 	// ---- Tee rotation ----
@@ -1291,7 +1306,6 @@ void CMenus::RenderSettingsTestClient(CUIRect MainView)
 				*pMode = 0;
 			if(DoButton_CheckBox(&s_aModeButtons[Index][1], Localize("Linear"), *pMode == 1, &ModeLinear))
 				*pMode = 1;
-
 			DoButton_CheckBoxAutoVMarginAndSet(pWave, Localize("Wave over the whole name"), pWave, &View, LineSize);
 
 			DoLine_ColorPicker(&s_aColorButtons[Index][0], ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &View, Localize("Color 1"), pColor1, Default1, false);
@@ -1378,18 +1392,8 @@ void CMenus::RenderSettingsTestClient(CUIRect MainView)
 		// ---- Per-group colors (right) ----
 		Ui()->DoLabel_AutoLineSize(Localize("Colors per group"), HeadlineFontSize, TEXTALIGN_ML, &Right, HeadlineHeight);
 		Right.HSplitTop(MarginSmall, nullptr, &Right);
-
-		// Лямбда для отрисовки "окошек" (панелей) вокруг групп
 		auto DrawGroupBox = [&](CUIRect Box) {
 			Graphics()->TextureClear();
-			// Легкий фон панели
-			Graphics()->QuadsBegin();
-			Graphics()->SetColor(0.05f, 0.05f, 0.05f, 0.2f);
-			IGraphics::CQuadItem BgQuad(Box.x, Box.y, Box.w, Box.h);
-			Graphics()->QuadsDrawTL(&BgQuad, 1);
-			Graphics()->QuadsEnd();
-
-			// Рамка панели
 			Graphics()->QuadsBegin();
 			Graphics()->SetColor(0.3f, 0.3f, 0.3f, 0.5f);
 			float t = 1.0f;
@@ -2048,7 +2052,56 @@ void CMenus::RenderSettingsTestClient(CUIRect MainView)
 		g_Config.m_ClExtraAutoSwitch ^= 1;
 	Ui()->DoToolTip(&g_Config.m_ClExtraAutoSwitch, &Button, Localize("Automatically switch camera to Dummy or Extra connections when they join"));
 	// =====================================
+	// === Рандомизация ника + скинов ===
+	MainView.HSplitTop(6.0f, nullptr, &MainView);
+	MainView.HSplitTop(20.0f, &Button, &MainView);
+	s_ScrollRegion.AddRect(Button);
+	static CButtonContainer s_RandomizeNickSkinCheckbox;
+	if(DoButton_CheckBox(&s_RandomizeNickSkinCheckbox, Localize("Randomize nick + skins continuously"), g_Config.m_ClRandomizeNickSkin, &Button))
+		g_Config.m_ClRandomizeNickSkin ^= 1;
+	Ui()->DoToolTip(&s_RandomizeNickSkinCheckbox, &Button, Localize("While online, periodically change nick (from other players) and skins"));
 
+	if(g_Config.m_ClRandomizeNickSkin)
+	{
+		MainView.HSplitTop(4.0f, nullptr, &MainView);
+		MainView.HSplitTop(20.0f, &Button, &MainView);
+		s_ScrollRegion.AddRect(Button);
+		Ui()->DoScrollbarOption(&g_Config.m_ClRandomizeNickSkinInterval, &g_Config.m_ClRandomizeNickSkinInterval, &Button,
+			Localize("Randomize interval"), 5, 120, &CUi::ms_LinearScrollbarScale, 0u, " s");
+	}
+	// =====================================
+	// Scroll inertia strength
+	MainView.HSplitTop(20.0f, &Button, &MainView);
+	s_ScrollRegion.AddRect(Button);
+	Ui()->DoScrollbarOption(&g_Config.m_ClScrollInertiaStrength, &g_Config.m_ClScrollInertiaStrength, &Button, Localize("Scroll inertia"), 10, 300, &CUi::ms_LinearScrollbarScale, 0u, "%");
+
+	// Scroll inertia decay
+	MainView.HSplitTop(20.0f, &Button, &MainView);
+	s_ScrollRegion.AddRect(Button);
+	Ui()->DoScrollbarOption(&g_Config.m_ClScrollInertiaDecay, &g_Config.m_ClScrollInertiaDecay, &Button, Localize("Scroll stop speed"), 10, 300, &CUi::ms_LinearScrollbarScale, 0u, "%");
+
+	// Scroll inertia speed
+	MainView.HSplitTop(20.0f, &Button, &MainView);
+	s_ScrollRegion.AddRect(Button);
+	Ui()->DoScrollbarOption(&g_Config.m_ClScrollInertiaSpeed, &g_Config.m_ClScrollInertiaSpeed, &Button, Localize("Scroll flight speed"), 10, 300, &CUi::ms_LinearScrollbarScale, 0u, "%");
+
+	// Mouse threshold
+	MainView.HSplitTop(20.0f, &Button, &MainView);
+	s_ScrollRegion.AddRect(Button);
+	Ui()->DoScrollbarOption(&g_Config.m_ClScrollMouseThreshold, &g_Config.m_ClScrollMouseThreshold, &Button, Localize("Min flick speed"), 0, 500, &CUi::ms_LinearScrollbarScale, 0u, " px/s");
+
+	// Drag threshold
+	MainView.HSplitTop(20.0f, &Button, &MainView);
+	s_ScrollRegion.AddRect(Button);
+	Ui()->DoScrollbarOption(&g_Config.m_ClScrollDragThreshold, &g_Config.m_ClScrollDragThreshold, &Button, Localize("Drag start distance"), 1, 100, &CUi::ms_LinearScrollbarScale, 0u, " px");
+	// === Smooth touch scrolling ===
+	MainView.HSplitTop(20.0f, &Button, &MainView);
+	s_ScrollRegion.AddRect(Button);
+	static CButtonContainer s_TouchScrollSmoothCheckbox;
+	if(DoButton_CheckBox(&s_TouchScrollSmoothCheckbox, Localize("Smooth touch scrolling"), g_Config.m_ClTouchScrollSmooth != 0, &Button))
+		g_Config.m_ClTouchScrollSmooth = (g_Config.m_ClTouchScrollSmooth == 0) ? 2 : 0;
+	Ui()->DoToolTip(&g_Config.m_ClTouchScrollSmooth, &Button, Localize("Scrolling with momentum like in a browser"));
+	// ==============================
 	// Enable toggle (Emote cycle)
 	MainView.HSplitTop(20.0f, &Button, &MainView);
 	static CButtonContainer s_EmoteCycleCheckbox;
@@ -2338,10 +2391,10 @@ void CMenus::RenderSettingsTestClient(CUIRect MainView)
 
 void CMenus::RenderSettingsAnimations(CUIRect MainView)
 {
-	static CScrollRegion s_Scroll;
-	CScrollRegionParams Params;
-	Params.m_ScrollUnit = 60.0f;
-	s_Scroll.Begin(&MainView, &Params);
+	static CScrollRegion s_ScrollRegion;
+	CScrollRegionParams ScrollParams;
+	ScrollParams.m_ScrollUnit = 60.0f;
+	s_ScrollRegion.Begin(&MainView, &ScrollParams);
 	const float StartY = MainView.y;
 
 	const float LineSize = 20.0f;
@@ -2352,6 +2405,7 @@ void CMenus::RenderSettingsAnimations(CUIRect MainView)
 	CUIRect Left, Row;
 	MainView.VSplitMid(&Left, nullptr, 20.0f);
 
+	// Easing buttons row (Linear / Ease-Out / Ease-In-Out / Bounce)
 	auto RenderEasing = [&](int *pEasing, CButtonContainer *pButtons) {
 		Left.HSplitTop(LineSize, &Row, &Left);
 		CUIRect ELinear, EOut, EInOut, EBounce;
@@ -2406,6 +2460,7 @@ void CMenus::RenderSettingsAnimations(CUIRect MainView)
 		Ui()->ClipDisable();
 	};
 
+	// ---------- Start Menu Transition ----------
 	{
 		CUIRect Title;
 		Left.HSplitTop(HeadlineHeight, &Title, &Left);
@@ -2429,6 +2484,7 @@ void CMenus::RenderSettingsAnimations(CUIRect MainView)
 		RenderEasing(&g_Config.m_ClStartMenuAnimationEasing, s_aStartMenuEasing);
 	}
 
+	// ---------- Page Transitions ----------
 	Left.HSplitTop(20.0f, nullptr, &Left);
 	{
 		CUIRect Title;
@@ -2453,9 +2509,481 @@ void CMenus::RenderSettingsAnimations(CUIRect MainView)
 		RenderEasing(&g_Config.m_ClSettingsTabAnimationEasing, s_aPageEasing);
 	}
 
+	// ---------- Button outline panel ----------
+	{
+		Left.HSplitTop(20.0f, nullptr, &Left);
+		CUIRect Panel, Content;
+		Left.HSplitTop(250.0f, &Panel, &Left);
+		Panel.Draw(ColorRGBA(1.0f, 1.0f, 1.0f, 0.25f), IGraphics::CORNER_ALL, 10.0f);
+		Panel.Margin(10.0f, &Content);
+
+		CUIRect Title;
+		Content.HSplitTop(24.0f, &Title, &Content);
+		Content.HSplitTop(6.0f, nullptr, &Content);
+		Ui()->DoLabel(&Title, Localize("Buttons"), 20.0f, TEXTALIGN_ML);
+
+		CUIRect EnableRect;
+		Content.HSplitTop(20.0f, &EnableRect, &Content);
+		if(DoButton_CheckBox(&g_Config.m_ClButtonOutline, Localize("Button outline"), g_Config.m_ClButtonOutline, &EnableRect))
+			g_Config.m_ClButtonOutline ^= 1;
+
+		static std::vector<CButtonContainer> s_aWidthButtons = {{}, {}, {}, {}};
+		static std::vector<const char *> s_apWidthLabels = {Localize("Thin"), Localize("Normal"), Localize("Thick"), Localize("Extra thick")};
+		static std::vector<int> s_aWidthValues = {2, 4, 8, 12};
+		int CurWidth = g_Config.m_ClButtonOutlineWidth;
+		DoLine_RadioMenu(Content, Localize("Outline width"), s_aWidthButtons, s_apWidthLabels, s_aWidthValues, CurWidth);
+		g_Config.m_ClButtonOutlineWidth = CurWidth;
+
+		static CButtonContainer s_Color1Reset;
+		static CButtonContainer s_Color2Reset;
+		DoLine_ColorPicker(&s_Color1Reset, 25.0f, 13.0f, 5.0f, &Content, Localize("Color 1"),
+			(unsigned int *)&g_Config.m_ClButtonOutlineColor1, ColorRGBA(0.0f, 1.0f, 0.0f, 1.0f), true, nullptr, false);
+		DoLine_ColorPicker(&s_Color2Reset, 25.0f, 13.0f, 5.0f, &Content, Localize("Color 2"),
+			(unsigned int *)&g_Config.m_ClButtonOutlineColor2, ColorRGBA(0.0f, 1.0f, 1.0f, 1.0f), true, nullptr, false);
+
+		static std::vector<CButtonContainer> s_aModeButtons = {{}, {}};
+		static std::vector<const char *> s_apModeLabels = {Localize("Constant"), Localize("Linear")};
+		static std::vector<int> s_aModeValues = {0, 1};
+		int CurMode = g_Config.m_ClButtonOutlineMode;
+		DoLine_RadioMenu(Content, Localize("Mode"), s_aModeButtons, s_apModeLabels, s_aModeValues, CurMode);
+		g_Config.m_ClButtonOutlineMode = CurMode;
+
+		if(g_Config.m_ClButtonOutlineMode == 1)
+		{
+			CUIRect SpeedRect;
+			Content.HSplitTop(25.0f, &SpeedRect, &Content);
+			Ui()->DoScrollbarOption(&g_Config.m_ClButtonOutlineSpeed, &g_Config.m_ClButtonOutlineSpeed, &SpeedRect, Localize("Shimmer speed"), 1, 300, &CUi::ms_LinearScrollbarScale, 0u, "%");
+		}
+	}
+
+	// Регистрируем высоту всего контента для скролла
 	CUIRect UsedRect = MainView;
 	UsedRect.y = StartY;
 	UsedRect.h = Left.y - StartY + 10.0f;
-	s_Scroll.AddRect(UsedRect);
-	s_Scroll.End();
+	s_ScrollRegion.AddRect(UsedRect);
+	s_ScrollRegion.End();
+}
+// ===================== Profiles =====================
+static CScrollRegion s_ProfileListScroll;
+static CScrollRegion s_ProfileEditScroll;
+static CScrollRegion s_ProfileSkinScroll;
+
+static const char *PROFILES_FILE = "hydra_profiles.txt";
+static const int MAX_PROFILES = 64;
+
+static void ProfileSanitize(char *pStr)
+{
+	for(; *pStr; pStr++)
+	{
+		if(*pStr == '\t' || *pStr == '\n' || *pStr == '\r')
+			*pStr = ' ';
+	}
+}
+
+void CMenus::ProfileFromCurrent(SProfile &Profile)
+{
+	str_copy(Profile.m_aPlayerName, g_Config.m_PlayerName);
+	str_copy(Profile.m_aClan, g_Config.m_PlayerClan);
+	str_copy(Profile.m_aSkin, g_Config.m_ClPlayerSkin);
+	Profile.m_UseCustomColor = g_Config.m_ClPlayerUseCustomColor;
+	Profile.m_ColorBody = g_Config.m_ClPlayerColorBody;
+	Profile.m_ColorFeet = g_Config.m_ClPlayerColorFeet;
+}
+
+void CMenus::ProfileApply(const SProfile &Profile)
+{
+	str_copy(g_Config.m_PlayerName, Profile.m_aPlayerName);
+	str_copy(g_Config.m_PlayerClan, Profile.m_aClan);
+	str_copy(g_Config.m_ClPlayerSkin, Profile.m_aSkin);
+	g_Config.m_ClPlayerUseCustomColor = Profile.m_UseCustomColor;
+	g_Config.m_ClPlayerColorBody = Profile.m_ColorBody;
+	g_Config.m_ClPlayerColorFeet = Profile.m_ColorFeet;
+
+	GameClient()->m_Skins.SkinList().ForceRefresh();
+	if(Client()->State() == IClient::STATE_ONLINE)
+		GameClient()->SendInfo(false);
+}
+
+void CMenus::ProfilesLoad()
+{
+	m_vProfiles.clear();
+	IOHANDLE File = Storage()->OpenFile(PROFILES_FILE, IOFLAG_READ, IStorage::TYPE_SAVE);
+	if(!File)
+		return;
+	char *pData = io_read_all_str(File);
+	io_close(File);
+	if(!pData)
+		return;
+
+	const char *pLine = pData;
+	char aLine[512];
+	while((pLine = str_next_token(pLine, "\n", aLine, sizeof(aLine))))
+	{
+		SProfile Profile{};
+		const char *pField = aLine;
+		char aField[64];
+		int Index = 0;
+		while((pField = str_next_token(pField, "\t", aField, sizeof(aField))))
+		{
+			// строковые поля начинаются с '~', чтобы пустые значения не терялись
+			const char *pValue = aField[0] == '~' ? aField + 1 : aField;
+			switch(Index)
+			{
+			case 0: str_copy(Profile.m_aName, pValue); break;
+			case 1: str_copy(Profile.m_aPlayerName, pValue); break;
+			case 2: str_copy(Profile.m_aClan, pValue); break;
+			case 3: str_copy(Profile.m_aSkin, pValue); break;
+			case 4: Profile.m_UseCustomColor = str_toint(pValue) != 0; break;
+			case 5: Profile.m_ColorBody = (unsigned int)str_toint(pValue); break;
+			case 6: Profile.m_ColorFeet = (unsigned int)str_toint(pValue); break;
+			}
+			Index++;
+		}
+		if(Index >= 7 && (int)m_vProfiles.size() < MAX_PROFILES)
+			m_vProfiles.push_back(Profile);
+	}
+	free(pData);
+}
+
+void CMenus::ProfilesSave()
+{
+	IOHANDLE File = Storage()->OpenFile(PROFILES_FILE, IOFLAG_WRITE, IStorage::TYPE_SAVE);
+	if(!File)
+		return;
+	for(SProfile &Profile : m_vProfiles)
+	{
+		ProfileSanitize(Profile.m_aName);
+		ProfileSanitize(Profile.m_aPlayerName);
+		ProfileSanitize(Profile.m_aClan);
+		ProfileSanitize(Profile.m_aSkin);
+
+		char aLine[512];
+		str_format(aLine, sizeof(aLine), "~%s\t~%s\t~%s\t~%s\t%d\t%u\t%u",
+			Profile.m_aName, Profile.m_aPlayerName, Profile.m_aClan, Profile.m_aSkin,
+			Profile.m_UseCustomColor, Profile.m_ColorBody, Profile.m_ColorFeet);
+		io_write(File, aLine, str_length(aLine));
+		io_write_newline(File);
+	}
+	io_close(File);
+}
+
+bool CMenus::DoProfileSkinPicker(CUIRect View, SProfile &Profile)
+{
+	bool Changed = false;
+	auto &SkinList = GameClient()->m_Skins.SkinList();
+	if(SkinList.Skins().empty())
+		SkinList.ForceRefresh();
+
+	CUIRect SearchRow;
+	View.HSplitTop(22.0f, &SearchRow, &View);
+	View.HSplitTop(6.0f, nullptr, &View);
+	static char s_aSearch[64] = "";
+	static CLineInput s_Search(s_aSearch, sizeof(s_aSearch));
+	s_Search.SetEmptyText(Localize("Search skins..."));
+	Ui()->DoEditBox(&s_Search, &SearchRow, 12.0f);
+
+	std::vector<CSkins::CSkinListEntry *> vFiltered;
+	vFiltered.reserve(SkinList.Skins().size());
+	for(auto &Entry : SkinList.Skins())
+	{
+		const CSkins::CSkinContainer *pC = Entry.SkinContainer();
+		if(pC == nullptr)
+			continue;
+		if(s_aSearch[0] != '\0' && str_find_nocase(pC->Name(), s_aSearch) == nullptr)
+			continue;
+		vFiltered.push_back(&Entry);
+	}
+
+	View.Draw(ColorRGBA(0.05f, 0.05f, 0.05f, 0.5f), IGraphics::CORNER_ALL, 5.0f);
+	View.Margin(4.0f, &View);
+
+	CScrollRegionParams ScrollParams;
+	ScrollParams.m_ScrollUnit = 40.0f;
+	ScrollParams.m_ScrollbarThickness = 12.0f;
+	ScrollParams.m_ScrollbarMargin = 2.0f;
+	s_ProfileSkinScroll.Begin(&View, &ScrollParams);
+
+	const float CellW = 70.0f;
+	const float CellH = 92.0f;
+	const float CellGap = 4.0f;
+	const int PerRow = std::max(1, (int)((View.w + CellGap) / (CellW + CellGap)));
+
+	for(size_t idx = 0; idx < vFiltered.size(); ++idx)
+	{
+		CSkins::CSkinListEntry *pEntry = vFiltered[idx];
+		const CSkins::CSkinContainer *pC = pEntry->SkinContainer();
+		const char *pName = pC->Name();
+
+		CUIRect Cell;
+		Cell.x = View.x + ((int)idx % PerRow) * (CellW + CellGap);
+		Cell.y = View.y + ((int)idx / PerRow) * (CellH + CellGap);
+		Cell.w = CellW;
+		Cell.h = CellH;
+
+		// AddRect для всех (нужна полная высота), рисуем только видимые
+		if(!s_ProfileSkinScroll.AddRect(Cell))
+			continue;
+
+		pEntry->RequestLoad();
+		const bool Active = str_comp(Profile.m_aSkin, pName) == 0;
+		Cell.Draw(Active ? ColorRGBA(0.20f, 0.45f, 0.85f, 0.75f) : ColorRGBA(0.12f, 0.12f, 0.12f, 0.75f), IGraphics::CORNER_ALL, 4.0f);
+
+		CUIRect Preview = Cell;
+		Preview.HSplitTop(CellH - 18.0f, &Preview, nullptr);
+		Preview.Margin(6.0f, &Preview);
+
+		const std::unique_ptr<CSkin> &pSkinPtr = pC->Skin();
+		if(pSkinPtr)
+		{
+			CTeeRenderInfo Info;
+			Info.m_aSixup[g_Config.m_ClDummy].Reset();
+			Info.Apply(pSkinPtr.get());
+			Info.ApplyColors(Profile.m_UseCustomColor, Profile.m_ColorBody, Profile.m_ColorFeet);
+			Info.m_Size = Preview.h;
+			RenderTools()->RenderTee(CAnimState::GetIdle(), &Info, EMOTE_NORMAL, vec2(1.0f, 0.0f), Preview.Center());
+		}
+		else
+		{
+			Ui()->DoLabel(&Preview, "...", 20.0f, TEXTALIGN_MC);
+		}
+
+		CUIRect NameRect = Cell;
+		NameRect.HSplitBottom(18.0f, nullptr, &NameRect);
+		SLabelProperties Props;
+		Props.m_MaxWidth = NameRect.w;
+		Ui()->DoLabel(&NameRect, pName, 10.0f, TEXTALIGN_MC, Props);
+
+		if(Ui()->MouseInside(&Cell) && Ui()->MouseButtonClicked(0))
+		{
+			str_copy(Profile.m_aSkin, pName);
+			Changed = true;
+		}
+	}
+
+	if(vFiltered.empty())
+		Ui()->DoLabel(&View, Localize("No matching skins"), 12.0f, TEXTALIGN_MC);
+
+	s_ProfileSkinScroll.End();
+	return Changed;
+}
+
+void CMenus::RenderSettingsProfiles(CUIRect MainView)
+{
+	if(!m_ProfilesLoaded)
+	{
+		ProfilesLoad();
+		m_ProfilesLoaded = true;
+	}
+	if(m_ProfilesDirty && time_get() - m_ProfilesLastChange > time_freq() / 2)
+	{
+		ProfilesSave();
+		m_ProfilesDirty = false;
+	}
+	auto MarkDirty = [&]() {
+		m_ProfilesDirty = true;
+		m_ProfilesLastChange = time_get();
+	};
+
+	if(m_ProfileSelected >= (int)m_vProfiles.size())
+		m_ProfileSelected = (int)m_vProfiles.size() - 1;
+	const bool HasSelection = m_ProfileSelected >= 0;
+
+	const float ColumnGap = 15.0f;
+	CUIRect ListCol, EditCol, SkinCol, Rest;
+	MainView.VSplitLeft(MainView.w * 0.25f, &ListCol, &Rest);
+	Rest.VSplitLeft(ColumnGap, nullptr, &Rest);
+	const float EditWidth = Rest.w * 0.58f;
+	Rest.VSplitLeft(EditWidth, &EditCol, &Rest);
+	Rest.VSplitLeft(ColumnGap, nullptr, &SkinCol);
+
+	// ---------- Список профилей ----------
+	{
+		CUIRect Header, AddButton;
+		ListCol.HSplitTop(24.0f, &Header, &ListCol);
+		ListCol.HSplitTop(6.0f, nullptr, &ListCol);
+		Header.VSplitRight(30.0f, &Header, &AddButton);
+		Ui()->DoLabel(&Header, Localize("Profiles"), 18.0f, TEXTALIGN_ML);
+
+		static CButtonContainer s_AddButton;
+		if(DoButton_Menu(&s_AddButton, "+", 0, &AddButton) && (int)m_vProfiles.size() < MAX_PROFILES)
+		{
+			SProfile Profile{};
+			str_format(Profile.m_aName, sizeof(Profile.m_aName), "Profile %d", (int)m_vProfiles.size() + 1);
+			ProfileFromCurrent(Profile);
+			m_vProfiles.push_back(Profile);
+			m_ProfileSelected = (int)m_vProfiles.size() - 1;
+			MarkDirty();
+		}
+
+		if(m_vProfiles.empty())
+		{
+			Ui()->DoLabel(&ListCol, Localize("Press + to create a profile"), 12.0f, TEXTALIGN_TC, {.m_MaxWidth = ListCol.w});
+		}
+		else
+		{
+			static CButtonContainer s_aItemButtons[MAX_PROFILES];
+			CScrollRegionParams ListParams;
+			ListParams.m_ScrollbarThickness = 12.0f;
+			ListParams.m_ScrollbarMargin = 2.0f;
+			ListParams.m_ScrollUnit = 40.0f;
+			s_ProfileListScroll.Begin(&ListCol, &ListParams);
+			for(int i = 0; i < (int)m_vProfiles.size(); i++)
+			{
+				CUIRect Item;
+				ListCol.HSplitTop(28.0f, &Item, &ListCol);
+				ListCol.HSplitTop(4.0f, nullptr, &ListCol);
+				if(!s_ProfileListScroll.AddRect(Item))
+					continue;
+				if(DoButton_Menu(&s_aItemButtons[i], m_vProfiles[i].m_aName, i == m_ProfileSelected, &Item))
+					m_ProfileSelected = i;
+			}
+			s_ProfileListScroll.End();
+		}
+	}
+
+	if(!HasSelection)
+	{
+		Ui()->DoLabel(&EditCol, Localize("Create or select a profile"), 14.0f, TEXTALIGN_MC);
+		return;
+	}
+
+	SProfile &Profile = m_vProfiles[m_ProfileSelected];
+	bool DoApply = false;
+	bool DoDelete = false;
+	bool DoFromCurrent = false;
+	static int64_t s_AppliedTime = 0;
+
+	// ---------- Редактор ----------
+	{
+		CScrollRegionParams EditParams;
+		EditParams.m_ScrollbarThickness = 12.0f;
+		EditParams.m_ScrollbarMargin = 2.0f;
+		EditParams.m_ScrollUnit = 60.0f;
+		s_ProfileEditScroll.Begin(&EditCol, &EditParams);
+		const CUIRect EditArea = EditCol;
+		const float StartY = EditCol.y;
+
+		static CLineInput s_NameInput, s_NickInput, s_ClanInput, s_SkinInput;
+		auto DoTextRow = [&](CLineInput &Input, const char *pLabel, char *pBuf, size_t Size) {
+			CUIRect Row, Label, Edit;
+			EditCol.HSplitTop(22.0f, &Row, &EditCol);
+			EditCol.HSplitTop(5.0f, nullptr, &EditCol);
+			Row.VSplitLeft(90.0f, &Label, &Edit);
+			Ui()->DoLabel(&Label, pLabel, 14.0f, TEXTALIGN_ML);
+			Input.SetBuffer(pBuf, Size);
+			if(Ui()->DoClearableEditBox(&Input, &Edit, 13.0f))
+				MarkDirty();
+		};
+		DoTextRow(s_NameInput, Localize("Profile"), Profile.m_aName, sizeof(Profile.m_aName));
+		DoTextRow(s_NickInput, Localize("Nickname"), Profile.m_aPlayerName, sizeof(Profile.m_aPlayerName));
+		DoTextRow(s_ClanInput, Localize("Clan"), Profile.m_aClan, sizeof(Profile.m_aClan));
+		DoTextRow(s_SkinInput, Localize("Skin"), Profile.m_aSkin, sizeof(Profile.m_aSkin));
+
+		// Предпросмотр
+		{
+			CUIRect Preview;
+			EditCol.HSplitTop(64.0f, &Preview, &EditCol);
+			EditCol.HSplitTop(5.0f, nullptr, &EditCol);
+			const CSkin *pDefaultSkin = GameClient()->m_Skins.Find("default");
+			const CSkins::CSkinContainer *pC = GameClient()->m_Skins.FindContainerOrNullptr(Profile.m_aSkin[0] == '\0' ? "default" : Profile.m_aSkin);
+			CTeeRenderInfo Info;
+			Info.Apply(pC == nullptr || pC->Skin() == nullptr ? pDefaultSkin : pC->Skin().get());
+			Info.ApplyColors(Profile.m_UseCustomColor, Profile.m_ColorBody, Profile.m_ColorFeet);
+			Info.m_Size = 50.0f;
+			vec2 OffsetToMid;
+			CRenderTools::GetRenderTeeOffsetToRenderedTee(CAnimState::GetIdle(), &Info, OffsetToMid);
+			RenderTools()->RenderTee(CAnimState::GetIdle(), &Info, EMOTE_NORMAL, vec2(1.0f, 0.0f),
+				vec2(Preview.x + Preview.w / 2.0f, Preview.y + Preview.h / 2.0f + OffsetToMid.y));
+		}
+
+		// Цвета
+		CUIRect CheckRow;
+		EditCol.HSplitTop(20.0f, &CheckRow, &EditCol);
+		EditCol.HSplitTop(5.0f, nullptr, &EditCol);
+		if(DoButton_CheckBox(&Profile.m_UseCustomColor, Localize("Custom colors"), Profile.m_UseCustomColor, &CheckRow))
+		{
+			Profile.m_UseCustomColor ^= 1;
+			MarkDirty();
+		}
+
+		if(Profile.m_UseCustomColor)
+		{
+			unsigned int *apColors[] = {&Profile.m_ColorBody, &Profile.m_ColorFeet};
+			const char *apParts[] = {Localize("Body"), Localize("Feet")};
+			for(int i = 0; i < 2; i++)
+			{
+				CUIRect Part, Label;
+				EditCol.HSplitTop(95.0f, &Part, &EditCol);
+				EditCol.HSplitTop(8.0f, nullptr, &EditCol);
+				Part.HSplitTop(20.0f, &Label, &Part);
+				Ui()->DoLabel(&Label, apParts[i], 14.0f, TEXTALIGN_ML);
+				if(RenderHslaScrollbars(&Part, apColors[i], false, ColorHSLA::DARKEST_LGT))
+					MarkDirty();
+			}
+		}
+
+		// Кнопки
+		{
+			CUIRect Buttons, ApplyBtn, CurrentBtn, DeleteBtn, Tmp;
+			EditCol.HSplitTop(26.0f, &Buttons, &EditCol);
+			EditCol.HSplitTop(6.0f, nullptr, &EditCol);
+			Buttons.VSplitLeft(Buttons.w / 3.0f, &ApplyBtn, &Tmp);
+			Tmp.VSplitLeft(Tmp.w / 2.0f, &CurrentBtn, &DeleteBtn);
+			ApplyBtn.VMargin(2.0f, &ApplyBtn);
+			CurrentBtn.VMargin(2.0f, &CurrentBtn);
+			DeleteBtn.VMargin(2.0f, &DeleteBtn);
+
+			static CButtonContainer s_ApplyButton, s_CurrentButton, s_DeleteButton;
+			if(DoButton_Menu(&s_ApplyButton, Localize("Apply"), 0, &ApplyBtn, BUTTONFLAG_LEFT, nullptr, IGraphics::CORNER_ALL, 5.0f, 0.0f, ColorRGBA(0.0f, 1.0f, 0.0f, 0.25f)))
+				DoApply = true;
+			if(DoButton_Menu(&s_CurrentButton, Localize("From current"), 0, &CurrentBtn))
+				DoFromCurrent = true;
+			if(DoButton_Menu(&s_DeleteButton, Localize("Delete"), 0, &DeleteBtn, BUTTONFLAG_LEFT, nullptr, IGraphics::CORNER_ALL, 5.0f, 0.0f, ColorRGBA(1.0f, 0.0f, 0.0f, 0.25f)))
+				DoDelete = true;
+
+			if(s_AppliedTime != 0 && time_get() - s_AppliedTime < time_freq() * 2)
+			{
+				CUIRect Info;
+				EditCol.HSplitTop(18.0f, &Info, &EditCol);
+				TextRender()->TextColor(0.4f, 1.0f, 0.4f, 1.0f);
+				Ui()->DoLabel(&Info, Localize("Profile applied"), 12.0f, TEXTALIGN_ML);
+				TextRender()->TextColor(TextRender()->DefaultTextColor());
+			}
+		}
+
+		CUIRect Used = EditArea;
+		Used.y = StartY;
+		Used.h = EditCol.y - StartY + 10.0f;
+		s_ProfileEditScroll.AddRect(Used);
+		s_ProfileEditScroll.End();
+	}
+
+	// ---------- Выбор скина ----------
+	{
+		CUIRect Title;
+		SkinCol.HSplitTop(24.0f, &Title, &SkinCol);
+		SkinCol.HSplitTop(6.0f, nullptr, &SkinCol);
+		Ui()->DoLabel(&Title, Localize("Choose skin"), 18.0f, TEXTALIGN_ML);
+		if(DoProfileSkinPicker(SkinCol, Profile))
+			MarkDirty();
+	}
+
+	// ---------- Действия (после всех ссылок на Profile) ----------
+	if(DoFromCurrent)
+	{
+		ProfileFromCurrent(Profile);
+		MarkDirty();
+	}
+	if(DoApply)
+	{
+		ProfileApply(Profile);
+		s_AppliedTime = time_get();
+	}
+	if(DoDelete)
+	{
+		m_vProfiles.erase(m_vProfiles.begin() + m_ProfileSelected);
+		if(m_ProfileSelected >= (int)m_vProfiles.size())
+			m_ProfileSelected = (int)m_vProfiles.size() - 1;
+		MarkDirty();
+	}
 }

@@ -16,6 +16,7 @@ namespace FontIcon
 	inline const char *const BACKWARD_FAST = "\uF049";
 	inline const char *const BACKWARD_STEP = "\uF048";
 	inline const char *const BAN = "\uF05E";
+	inline const char *const BELL = "\xEF\x83\xB3";
 	inline const char *const BOOKMARK = "\uF02E";
 	inline const char *const BORDER_ALL = "\uF84C";
 	inline const char *const BRUSH = "\uF55D";

@@ -1654,7 +1654,7 @@ set(EXPECTED_DATA
   gui_buttons.png
   gui_cursor.png
   gui_icons.png
-  gui_logo.png
+  hydra_logo.png
   hud.png
   languages/README.txt
   languages/arabic.txt
@@ -2670,6 +2670,8 @@ if(CLIENT)
     components/effects.h
     components/emoticon.cpp
     components/emoticon.h
+    components/events_manager.cpp
+    components/events_manager.h
     components/envelope_state.cpp
     components/envelope_state.h
     components/flow.cpp

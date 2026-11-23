@@ -78,6 +78,7 @@ public:
 	void Head();
 	void Post(const unsigned char *pData, size_t DataLength);
 	void PostJson(const char *pJson);
+	void Put(const unsigned char *pData, size_t DataLength);
 
 	virtual void Header(const char *pNameColonValue) = 0;
 	void HeaderString(const char *pName, const char *pValue);
@@ -136,6 +137,7 @@ protected:
 		HEAD,
 		POST,
 		POST_JSON,
+		PUT,
 	};
 	static const char *GetRequestType(REQUEST Type);
 

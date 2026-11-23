@@ -33,6 +33,13 @@ MACRO_CONFIG_INT(ClTouchControls, cl_touch_controls, 1, 0, 1, CFGFLAG_CLIENT | C
 #else
 MACRO_CONFIG_INT(ClTouchControls, cl_touch_controls, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Enable ingame touch controls")
 #endif
+MACRO_CONFIG_INT(ClTouchScrollSmooth, cl_touch_scroll_smooth, 2, 0, 2, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Smooth touch scrolling with inertia")
+MACRO_CONFIG_INT(ClWheelScrollAmount, cl_wheel_scroll_amount, 60, 10, 500, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Pixels to scroll per mouse wheel notch")
+MACRO_CONFIG_INT(ClScrollInertiaStrength, cl_scroll_inertia_strength, 100, 10, 300, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Scroll inertia strength (100 = default)")
+MACRO_CONFIG_INT(ClScrollInertiaDecay, cl_scroll_inertia_decay, 100, 10, 300, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Scroll inertia decay speed (100 = default, higher = stops faster)")
+MACRO_CONFIG_INT(ClScrollInertiaSpeed, cl_scroll_inertia_speed, 100, 10, 300, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Scroll inertia movement speed (100 = default)")
+MACRO_CONFIG_INT(ClScrollMouseThreshold, cl_scroll_mouse_threshold, 50, 0, 500, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Mouse velocity threshold for inertia to start (px/s)")
+MACRO_CONFIG_INT(ClScrollDragThreshold, cl_scroll_drag_threshold, 10, 1, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Pixels to move before drag-scroll starts")
 #if defined(CONF_PLATFORM_IOS)
 // iOS has neither a back button nor a keyboard to press the escape-key with.
 MACRO_CONFIG_INT(ClBackButton, cl_back_button, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Show draggable virtual back button")
@@ -331,7 +338,7 @@ MACRO_CONFIG_STR(ClDummy7SkinEyes, dummy7_skin_eyes, protocol7::MAX_SKIN_ARRAY_S
 // MACRO_CONFIG_STR(ClCensorUrl, cl_censor_url, 100, "https://info.ddnet.org/censor.json", CFGFLAG_CLIENT | CFGFLAG_SAVE, "URL used to download words to censor (must start with https://)")
 
 MACRO_CONFIG_INT(UiPage, ui_page, 6, 6, 13, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Interface page")
-MACRO_CONFIG_INT(UiSettingsPage, ui_settings_page, 0, 0, 10, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Interface settings page")
+MACRO_CONFIG_INT(UiSettingsPage, ui_settings_page, 0, 0, 20, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Interface settings page")
 MACRO_CONFIG_INT(UiToolboxPage, ui_toolbox_page, 0, 0, 2, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Toolbox page")
 MACRO_CONFIG_STR(UiServerAddress, ui_server_address, 1024, "localhost:8303", CFGFLAG_CLIENT | CFGFLAG_SAVE | CFGFLAG_INSENSITIVE, "Interface server address")
 MACRO_CONFIG_INT(UiMousesens, ui_mousesens, 200, 1, 100000, CFGFLAG_SAVE | CFGFLAG_CLIENT, "Mouse sensitivity for menus/editor")
@@ -467,7 +474,8 @@ MACRO_CONFIG_STR(ClAssetParticles, cl_asset_particles, 50, "default", CFGFLAG_SA
 MACRO_CONFIG_STR(ClAssetHud, cl_asset_hud, 50, "default", CFGFLAG_SAVE | CFGFLAG_CLIENT, "The asset for HUD")
 MACRO_CONFIG_STR(ClAssetExtras, cl_asset_extras, 50, "default", CFGFLAG_SAVE | CFGFLAG_CLIENT, "The asset for the game graphics that do not come from Teeworlds")
 MACRO_CONFIG_INT(ClExtraAutoSwitch, cl_extra_auto_switch, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Auto switch control to extra on connect");
-
+MACRO_CONFIG_INT(ClRandomizeNickSkin, cl_randomize_nick_skin, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Continuously randomize nick and skins while online")
+MACRO_CONFIG_INT(ClRandomizeNickSkinInterval, cl_randomize_nick_skin_interval, 15, 5, 120, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Interval in seconds between nick/skin randomizations")
 // Tee rotation
 MACRO_CONFIG_INT(ClTeeRotation, cl_tee_rotation, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Enable tee rotation effect")
 MACRO_CONFIG_INT(ClTeeRotationMode, cl_tee_rotation_mode, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Tee rotation mode (0 = linear, 1 = swing)")
@@ -768,6 +776,14 @@ MACRO_CONFIG_COL(ClMessageClientColor, cl_message_client_color, 9633471, CFGFLAG
 MACRO_CONFIG_COL(ClMessageHighlightColor, cl_message_highlight_color, 65471, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Highlighted message color")
 MACRO_CONFIG_COL(ClMessageTeamColor, cl_message_team_color, 5636050, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Team message color")
 MACRO_CONFIG_COL(ClMessageColor, cl_message_color, 255, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Message color")
+MACRO_CONFIG_INT(ClButtonOutline, cl_button_outline, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Show outline around menu buttons");
+MACRO_CONFIG_STR(ClReadNotifications, cl_read_notifications, 1024, "", CFGFLAG_CLIENT | CFGFLAG_SAVE, "IDs of read notifications (comma separated)")
+MACRO_CONFIG_STR(ClToastedNotifications, cl_toasted_notifications, 1024, "", CFGFLAG_CLIENT | CFGFLAG_SAVE, "IDs of notifications already shown as toast (comma separated)")
+MACRO_CONFIG_INT(ClButtonOutlineWidth, cl_button_outline_width, 4, 1, 20, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Width of the button outline");
+MACRO_CONFIG_COL(ClButtonOutlineColor1, cl_button_outline_color1, 0x00FF00FF, CFGFLAG_CLIENT | CFGFLAG_SAVE, "First gradient color of the button outline");
+MACRO_CONFIG_COL(ClButtonOutlineColor2, cl_button_outline_color2, 0x00FFFFFF, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Second gradient color of the button outline");
+MACRO_CONFIG_INT(ClButtonOutlineMode, cl_button_outline_mode, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Button outline: 0=constant, 1=linear shimmer");
+MACRO_CONFIG_INT(ClButtonOutlineSpeed, cl_button_outline_speed, 50, 1, 500, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Button outline shimmer speed in percent");
 MACRO_CONFIG_COL(ClLaserRifleInnerColor, cl_laser_rifle_inner_color, 11206591, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Laser inner color for Rifle")
 MACRO_CONFIG_COL(ClLaserRifleOutlineColor, cl_laser_rifle_outline_color, 11176233, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Laser outline color for Rifle")
 MACRO_CONFIG_COL(ClLaserShotgunInnerColor, cl_laser_sg_inner_color, 1467241, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Laser inner color for Shotgun")

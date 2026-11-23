@@ -228,7 +228,8 @@ void CGameClient::OnConsoleInit()
 					      &m_Menus,
 					      &m_KeyBinder,
 					      &m_GameConsole,
-					      &m_MenuBackground});
+					      &m_MenuBackground,
+					      &m_EventsManager});
 
 	// build the input stack
 	m_vpInput.insert(m_vpInput.end(), {&m_KeyBinder, // this will take over all input when we want to bind a key
@@ -532,11 +533,12 @@ void CGameClient::OnUpdate()
 
 	// handle touch events
 	std::vector<IInput::CTouchFingerState> vTouchFingerStates = Input()->TouchFingerStates();
+	bool ConsumedTouch = false;
 	for(auto &pComponent : m_vpInput)
 	{
 		if(pComponent->OnTouchState(vTouchFingerStates))
 		{
-			Input()->ClearTouchDeltas();
+			ConsumedTouch = true;
 		}
 	}
 
@@ -560,7 +562,8 @@ void CGameClient::OnUpdate()
 	{
 		pComponent->OnUpdate();
 	}
-
+	if(ConsumedTouch)
+		Input()->ClearTouchDeltas();
 	UpdateEmoteCycle();
 
 	m_LocalServer.Update();
@@ -909,9 +912,11 @@ void CGameClient::OnRender()
 	UpdateSpectatorCursor();
 
 	// render all systems
+	Ui()->DoBackButton();
 	for(auto &pComponent : m_vpAll)
 		pComponent->OnRender();
 	Ui()->OnRenderTooltip();
+	Ui()->RenderBackButton();
 
 	// clear all events/input for this frame
 	Input()->Clear();
@@ -1914,19 +1919,6 @@ void CGameClient::OnNewSnapshot(bool DummySwapped)
 			TempCore.Tick(false);
 			TempCore.Move();
 			TempCore.Quantize();
-		}
-		if(m_Snap.m_SpecInfo.m_Active)
-		{
-			int NumChar = 0;
-			for(int i = 0; i < MAX_CLIENTS; i++)
-				if(m_Snap.m_aCharacters[i].m_Active)
-					NumChar++;
-			static int s_LastLog = 0;
-			if(Client()->GameTick(0) - s_LastLog >= Client()->GameTickSpeed()) // раз в секунду
-			{
-				dbg_msg("spect", "chars_in_snap=%d tick=%d", NumChar, Client()->GameTick(0));
-				s_LastLog = Client()->GameTick(0);
-			}
 		}
 
 		TempCore.Write(pCharacter);

@@ -41,6 +41,7 @@ void CMenusStart::RenderStartMenu(CUIRect MainView)
 		ANIM_PLAY,
 		ANIM_CONSOLE,
 		ANIM_UPDATE,
+		ANIM_BELL,
 		NUM_ANIMATORS
 	};
 	static SUIAnimator s_aAnimators[NUM_ANIMATORS];
@@ -58,14 +59,20 @@ void CMenusStart::RenderStartMenu(CUIRect MainView)
 	GameClient()->m_MenuBackground.ChangePosition(CMenuBackground::POS_START);
 
 	// render logo (floating up and down)
-	const float AnimTime = (float)time() / (float)time_freq();
-	const float BannerY = MainView.y + 60.0f + sinf(AnimTime * 1.5f) * 6.0f;
-	Graphics()->TextureSet(g_pData->m_aImages[IMAGE_BANNER].m_Id);
-	Graphics()->QuadsBegin();
-	Graphics()->SetColor(1, 1, 1, 1);
-	IGraphics::CQuadItem QuadItem(MainView.w / 2 - 170, BannerY, 360, 103);
-	Graphics()->QuadsDrawTL(&QuadItem, 1);
-	Graphics()->QuadsEnd();
+	if(!GameClient()->m_Menus.m_HideStartMenuLogo)
+	{
+		const float AnimTime = (float)time() / (float)time_freq();
+		const float BannerY = MainView.y + 60.0f + sinf(AnimTime * 1.5f) * 6.0f;
+		Graphics()->TextureSet(GameClient()->m_Menus.m_HydraLogoTexture.IsValid() ? GameClient()->m_Menus.m_HydraLogoTexture : g_pData->m_aImages[IMAGE_BANNER].m_Id);
+		Graphics()->QuadsBegin();
+		Graphics()->SetColor(1, 1, 1, 1);
+		const CMenus &Menus = GameClient()->m_Menus;
+		const float BannerH = 103.0f;
+		const float BannerW = Menus.m_HydraLogoLoaded ? BannerH * Menus.m_HydraLogoAspect : 360.0f;
+		IGraphics::CQuadItem QuadItem(MainView.w / 2 + 10.0f - BannerW / 2.0f, BannerY, BannerW, BannerH);
+		Graphics()->QuadsDrawTL(&QuadItem, 1);
+		Graphics()->QuadsEnd();
+	}
 
 	const float Rounding = 10.0f;
 	const float VMargin = MainView.w / 2 - 190.0f;
@@ -121,7 +128,7 @@ void CMenusStart::RenderStartMenu(CUIRect MainView)
 	Menu.HSplitBottom(40.0f, &Menu, &Button);
 	static CButtonContainer s_QuitButton;
 	bool UsedEscape = false;
-	if(GameClient()->m_Menus.DoButton_Menu(&s_QuitButton, Localize("Quit"), 0, &Button, BUTTONFLAG_LEFT, nullptr, IGraphics::CORNER_ALL, Rounding, 0.5f, ColorRGBA(0.0f, 0.0f, 0.0f, 0.25f), nullptr, &s_aAnimators[ANIM_QUIT]) || CheckHotKey(KEY_Q))
+	if(GameClient()->m_Menus.DoButton_Menu(&s_QuitButton, Localize("Quit"), 0, &Button, BUTTONFLAG_LEFT, nullptr, IGraphics::CORNER_ALL, Rounding, 0.0f, ColorRGBA(0.0f, 0.0f, 0.0f, 0.25f), nullptr, &s_aAnimators[ANIM_QUIT]) || CheckHotKey(KEY_Q))
 	{
 		if(GameClient()->Editor()->HasUnsavedData() || (GameClient()->CurrentRaceTime() / 60 >= g_Config.m_ClConfirmQuitTime && g_Config.m_ClConfirmQuitTime >= 0))
 		{
@@ -207,8 +214,33 @@ void CMenusStart::RenderStartMenu(CUIRect MainView)
 	{
 		GameClient()->m_GameConsole.Toggle(CGameConsole::CONSOLETYPE_LOCAL);
 	}
+
+	// Колокольчик уведомлений (слева от кнопки консоли)
+	CUIRect BellButton = ConsoleButton;
+	BellButton.x -= ConsoleButton.w + 5.0f;
+	static CButtonContainer s_BellButton;
+	if(GameClient()->m_Menus.DoButton_Menu(&s_BellButton, FontIcon::NEWSPAPER, 0, &BellButton, BUTTONFLAG_LEFT, nullptr, IGraphics::CORNER_ALL, 5.0f, 0.0f, ColorRGBA(0.0f, 0.0f, 0.0f, 0.1f), nullptr, &s_aAnimators[ANIM_BELL]))
+	{
+		GameClient()->m_Menus.OpenNotifications();
+	}
 	TextRender()->SetRenderFlags(0);
 	TextRender()->SetFontPreset(EFontPreset::DEFAULT_FONT);
+
+	// Красный бейдж с числом непрочитанных
+	const int UnreadCount = GameClient()->m_EventsManager.UnreadCount();
+	if(UnreadCount > 0)
+	{
+		CUIRect Badge;
+		Badge.x = BellButton.x + BellButton.w - 12.0f;
+		Badge.y = BellButton.y - 5.0f;
+		Badge.w = 16.0f;
+		Badge.h = 16.0f;
+		Badge.Draw(ColorRGBA(1.0f, 0.1f, 0.1f, 1.0f), IGraphics::CORNER_ALL, 8.0f);
+
+		char aCount[8];
+		str_format(aCount, sizeof(aCount), "%d", UnreadCount > 9 ? 9 : UnreadCount);
+		Ui()->DoLabel(&Badge, aCount, 10.0f, TEXTALIGN_MC);
+	}
 
 	CUIRect VersionUpdate;
 	MainView.HSplitBottom(20.0f, nullptr, &VersionUpdate);
@@ -293,7 +325,10 @@ void CMenusStart::RenderStartMenu(CUIRect MainView)
 
 	if(NewPage != -1)
 	{
-		GameClient()->m_Menus.SetMenuPage(NewPage);
+		if(Client()->State() == IClient::STATE_ONLINE)
+			GameClient()->m_Menus.SetGamePage(NewPage);
+		else
+			GameClient()->m_Menus.SetMenuPage(NewPage);
 		GameClient()->m_Menus.SetShowStart(false);
 	}
 }

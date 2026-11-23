@@ -322,5 +322,11 @@ private:
 	static void ConfigSaveCallback(IConfigManager *pConfigManager, void *pUserData);
 	void OnConfigSave(IConfigManager *pConfigManager);
 	static void ConchainRefreshSkinList(IConsole::IResult *pResult, void *pUserData, IConsole::FCommandCallback pfnCallback, void *pCallbackUserData);
+
+public:
+	// Синхронно загрузить скин по имени. Используется для preload текстур
+	// на старте клиента, чтобы первый клик по вкладке Player/Tee/Force Skin
+	// не фризил из-за чтения PNG с диска.
+	void LoadSkinSynchronous(const char *pName) { LoadSkinDirect(pName); }
 };
 #endif

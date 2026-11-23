@@ -739,11 +739,6 @@ void CPlayers::RenderPlayer(
 	const bool Spec = GameClient()->m_Snap.m_SpecInfo.m_Active;
 	const int LocalId = GameClient()->m_Snap.m_LocalClientId;
 	const bool Avail = IsPlayerInfoAvailable(ClientId);
-
-	dbg_msg("spect", "RenderPlayer cid=%d local=%d spec=%d avail=%d pos=(%.0f,%.0f) inside=%d",
-		ClientId, LocalId, (int)Spec, (int)Avail,
-		Position.x, Position.y, (int)ScreenRect.Inside(Position));
-
 	if(!ScreenRect.Inside(Position))
 		return;
 
@@ -792,9 +787,6 @@ void CPlayers::RenderPlayer(
 	vec2 Direction = direction(Angle);
 	if(!std::isfinite(Direction.x) || !std::isfinite(Direction.y) || length(Direction) < 1e-6f)
 		Direction = vec2(1.0f, 0.0f);
-
-	dbg_msg("spect", "  -> cid=%d angle=%.3f dir=(%.3f,%.3f) teeRot=%d",
-		ClientId, Angle, Direction.x, Direction.y, (int)ShouldRotateTee(ClientId));
 	vec2 Vel = mix(vec2(Prev.m_VelX / 256.0f, Prev.m_VelY / 256.0f), vec2(Player.m_VelX / 256.0f, Player.m_VelY / 256.0f), Intra);
 
 	GameClient()->m_Flow.Add(Position, Vel * 100.0f, 10.0f);
@@ -1119,13 +1111,6 @@ inline bool CPlayers::IsPlayerInfoAvailable(int ClientId) const
 	const bool Active = GameClient()->m_Snap.m_aCharacters[ClientId].m_Active;
 	const bool HasPrev = GameClient()->m_Snap.m_apPrevPlayerInfos[ClientId] != nullptr;
 	const bool HasCur  = GameClient()->m_Snap.m_apPlayerInfos[ClientId] != nullptr;
-
-	if(GameClient()->m_Snap.m_SpecInfo.m_Active && (Active || HasPrev || HasCur))
-	{
-		dbg_msg("spect", "IsPlayerInfoAvailable cid=%d active=%d prev=%d cur=%d",
-			ClientId, (int)Active, (int)HasPrev, (int)HasCur);
-	}
-
 	return Active && HasPrev && HasCur;
 }
 
@@ -1358,8 +1343,6 @@ void CPlayers::OnRender()
 		RenderHookCollLine(ScreenRect, &GameClient()->m_aClients[ClientId].m_RenderPrev, &GameClient()->m_aClients[ClientId].m_RenderCur, ClientId);
 		RenderPlayer(ScreenRect, &GameClient()->m_aClients[ClientId].m_RenderPrev, &GameClient()->m_aClients[ClientId].m_RenderCur, &aRenderInfo[ClientId], ClientId);
 	}
-	dbg_msg("spect", "OnRender: SpecActive=%d LocalId=%d RenderLastId=%d NumAvail=%d NumTried=%d",
-		(int)GameClient()->m_Snap.m_SpecInfo.m_Active, LocalClientId, RenderLastId, NumAvail, NumTried);
 	if(RenderLastId != -1 && IsPlayerInfoAvailable(RenderLastId))
 	{
 		const CGameClient::CClientData *pClientData = &GameClient()->m_aClients[RenderLastId];

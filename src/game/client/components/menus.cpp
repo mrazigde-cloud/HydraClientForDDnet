@@ -31,11 +31,13 @@
 #include <game/client/animstate.h>
 #include <game/client/components/binds.h>
 #include <game/client/components/console.h>
+#include <game/client/components/events_manager.h>
 #include <game/client/components/key_binder.h>
 #include <game/client/components/menu_background.h>
 #include <game/client/components/sounds.h>
 #include <game/client/gameclient.h>
 #include <game/client/ui_listbox.h>
+#include <game/client/ui_scrollregion.h>
 #include <game/localization.h>
 
 #include <algorithm>
@@ -123,7 +125,147 @@ int CMenus::DoButton_Toggle(const void *pId, int Checked, const CUIRect *pRect, 
 
 	return Active ? Ui()->DoButtonLogic(pId, Checked, pRect, Flags) : 0;
 }
+void CMenus::DrawMenuButtonOutline(const CUIRect *pRect, float Rounding)
+{
+	if(!g_Config.m_ClButtonOutline)
+		return;
+	const float Width = (float)g_Config.m_ClButtonOutlineWidth;
+	if(Width <= 0.0f)
+		return;
 
+	float Shift = 0.0f;
+	if(g_Config.m_ClButtonOutlineMode == 1)
+	{
+		const float AnimTime = (float)time() / (float)time_freq();
+		const float Speed = (float)g_Config.m_ClButtonOutlineSpeed / 100.0f;
+		Shift = fmodf(AnimTime * Speed, 1.0f);
+	}
+
+	const ColorRGBA Color1 = color_cast<ColorRGBA>(ColorHSLA(g_Config.m_ClButtonOutlineColor1));
+	const ColorRGBA Color2 = color_cast<ColorRGBA>(ColorHSLA(g_Config.m_ClButtonOutlineColor2));
+
+	// Clamp radius to half the smaller dimension so straight segments never
+	// get negative lengths.
+	const float R = std::min({Rounding, pRect->w * 0.5f, pRect->h * 0.5f});
+	const float W = pRect->w;
+	const float H = pRect->h;
+	const float x0 = pRect->x;
+	const float y0 = pRect->y;
+
+	const float LineW = W - 2.0f * R;   // horizontal straight length
+	const float LineH = H - 2.0f * R;   // vertical straight length
+	const float ArcLen = (pi * 0.5f) * R;
+	const float Perim = 2.0f * LineW + 2.0f * LineH + 4.0f * ArcLen;
+	if(Perim <= 0.0f)
+		return;
+
+	// Color along the perimeter. `Triangle` gives C1 at t=0, C2 at t=0.5,
+	// C1 at t=1 — the ring closes without a visible color seam, and the
+	// `Shift` slides the whole gradient around the perimeter.
+	auto MixColorAt = [&](float T) -> ColorRGBA {
+		float P = fmodf(T + Shift, 1.0f);
+		if(P < 0.0f)
+			P += 1.0f;
+		const float Tri = P < 0.5f ? (P * 2.0f) : (2.0f - P * 2.0f);
+		const float Q = 1.0f - Tri;
+		return ColorRGBA(
+			Color1.r * Q + Color2.r * Tri,
+			Color1.g * Q + Color2.g * Tri,
+			Color1.b * Q + Color2.b * Tri,
+			Color1.a * Q + Color2.a * Tri);
+	};
+
+	auto EmitSeg = [&](const vec2 &P0, const vec2 &P1, const vec2 &N0, const vec2 &N1, float tA, float tB) {
+		const vec2 P0o = P0 + N0 * Width;
+		const vec2 P1o = P1 + N1 * Width;
+		const ColorRGBA cA = MixColorAt(tA);
+		const ColorRGBA cB = MixColorAt(tB);
+		Graphics()->SetColor4(cA, cA, cB, cB);
+		IGraphics::CFreeformItem F(P0.x, P0.y, P0o.x, P0o.y, P1.x, P1.y, P1o.x, P1o.y);
+		Graphics()->QuadsDrawFreeform(&F, 1);
+	};
+
+	auto AddLine = [&](const vec2 &Start, const vec2 &End, const vec2 &Normal, float TStart, float TEnd, int Segs) {
+		for(int i = 0; i < Segs; i++)
+		{
+			const float sA = (float)i / Segs;
+			const float sB = (float)(i + 1) / Segs;
+			const vec2 P0 = Start + (End - Start) * sA;
+			const vec2 P1 = Start + (End - Start) * sB;
+			const float tA = TStart + (TEnd - TStart) * sA;
+			const float tB = TStart + (TEnd - TStart) * sB;
+			EmitSeg(P0, P1, Normal, Normal, tA, tB);
+		}
+	};
+
+	auto AddArc = [&](const vec2 &Center, float StartAngle, float EndAngle, float Radius, float TStart, float TEnd, int Segs) {
+		for(int i = 0; i < Segs; i++)
+		{
+			const float sA = (float)i / Segs;
+			const float sB = (float)(i + 1) / Segs;
+			const float aA = StartAngle + (EndAngle - StartAngle) * sA;
+			const float aB = StartAngle + (EndAngle - StartAngle) * sB;
+			const vec2 D0(cosf(aA), sinf(aA));
+			const vec2 D1(cosf(aB), sinf(aB));
+			const vec2 P0 = Center + D0 * Radius;
+			const vec2 P1 = Center + D1 * Radius;
+			const float tA = TStart + (TEnd - TStart) * sA;
+			const float tB = TStart + (TEnd - TStart) * sB;
+			EmitSeg(P0, P1, D0, D1, tA, tB);
+		}
+	};
+
+	Graphics()->TextureClear();
+	Graphics()->QuadsBegin();
+
+	const int NumLineSegs = 6;
+	const int NumArcSegs = 6;
+
+	// Cumulative parameter at each piece boundary (clockwise from top edge)
+	const float TTop1 = LineW / Perim;
+	const float TTR1 = TTop1 + ArcLen / Perim;
+	const float TRight1 = TTR1 + LineH / Perim;
+	const float TBR1 = TRight1 + ArcLen / Perim;
+	const float TBottom1 = TBR1 + LineW / Perim;
+	const float TBL1 = TBottom1 + ArcLen / Perim;
+	const float TLeft1 = TBL1 + LineH / Perim;
+	const float TTL1 = TLeft1 + ArcLen / Perim;
+
+	// Top edge (left → right)
+	if(LineW > 0.0f)
+		AddLine(vec2(x0 + R, y0), vec2(x0 + W - R, y0), vec2(0.0f, -1.0f), 0.0f, TTop1, NumLineSegs);
+
+	// Top-right arc (-π/2 → 0)
+	if(R > 0.0f)
+		AddArc(vec2(x0 + W - R, y0 + R), -pi * 0.5f, 0.0f, R, TTop1, TTR1, NumArcSegs);
+
+	// Right edge (top → bottom)
+	if(LineH > 0.0f)
+		AddLine(vec2(x0 + W, y0 + R), vec2(x0 + W, y0 + H - R), vec2(1.0f, 0.0f), TTR1, TRight1, NumLineSegs);
+
+	// Bottom-right arc (0 → π/2)
+	if(R > 0.0f)
+		AddArc(vec2(x0 + W - R, y0 + H - R), 0.0f, pi * 0.5f, R, TRight1, TBR1, NumArcSegs);
+
+	// Bottom edge (right → left)
+	if(LineW > 0.0f)
+		AddLine(vec2(x0 + W - R, y0 + H), vec2(x0 + R, y0 + H), vec2(0.0f, 1.0f), TBR1, TBottom1, NumLineSegs);
+
+	// Bottom-left arc (π/2 → π)
+	if(R > 0.0f)
+		AddArc(vec2(x0 + R, y0 + H - R), pi * 0.5f, pi, R, TBottom1, TBL1, NumArcSegs);
+
+	// Left edge (bottom → top)
+	if(LineH > 0.0f)
+		AddLine(vec2(x0, y0 + H - R), vec2(x0, y0 + R), vec2(-1.0f, 0.0f), TBL1, TLeft1, NumLineSegs);
+
+	// Top-left arc (π → 3π/2)
+	if(R > 0.0f)
+		AddArc(vec2(x0 + R, y0 + R), pi, pi * 1.5f, R, TLeft1, TTL1, NumArcSegs);
+
+	Graphics()->QuadsEnd();
+	Graphics()->SetColor(1.0f, 1.0f, 1.0f, 1.0f);
+}
 int CMenus::DoButton_Menu(CButtonContainer *pButtonContainer, const char *pText, int Checked, const CUIRect *pRect, const unsigned Flags, const char *pImageName, int Corners, float Rounding, float FontFactor, ColorRGBA Color, const void *pImageHotId, SUIAnimator *pAnimator)
 {
 	// Hover animation: expand around center while keeping the original click zone.
@@ -147,7 +289,7 @@ int CMenus::DoButton_Menu(CButtonContainer *pButtonContainer, const char *pText,
 
 		pAnimator->m_Time = Time;
 
-		const float V = pAnimator->m_Value;
+		const float V = pAnimator->m_Value * pAnimator->m_Value * (3.0f - 2.0f * pAnimator->m_Value);
 		const float DeltaW = V * pAnimator->m_WOffset;
 		const float DeltaH = V * pAnimator->m_HOffset;
 		Rect.x -= DeltaW * 0.5f;
@@ -157,11 +299,18 @@ int CMenus::DoButton_Menu(CButtonContainer *pButtonContainer, const char *pText,
 	}
 
 	CUIRect Text = *pRect;
+	Text.HMargin(pRect->h >= 20.0f ? 2.0f : 1.0f, &Text);
+	Text.HMargin((Text.h * FontFactor) / 2.0f, &Text);
+	if(Text.h <= 0.0f)
+	{
+		Text = *pRect;
+		Text.Margin(1.0f, &Text);
+	}
 
 	if(Checked)
 		Color = ColorRGBA(0.6f, 0.6f, 0.6f, 0.5f);
 	Color.a *= Ui()->ButtonColorMul(pButtonContainer);
-
+	DrawMenuButtonOutline(&Rect, Rounding);
 	Rect.Draw(Color, Corners, Rounding);
 
 	if(pImageName)
@@ -213,10 +362,11 @@ int CMenus::DoButton_MenuTab(CButtonContainer *pButtonContainer, const char *pTe
 		else
 			pAnimator->m_Value = std::clamp<float>(pAnimator->m_Value - (Time - pAnimator->m_Time).count() / (double)std::chrono::nanoseconds(100ms).count(), 0, 1);
 
-		Rect.w += pAnimator->m_Value * pAnimator->m_WOffset;
-		Rect.h += pAnimator->m_Value * pAnimator->m_HOffset;
-		Rect.x += pAnimator->m_Value * pAnimator->m_XOffset;
-		Rect.y += pAnimator->m_Value * pAnimator->m_YOffset;
+		const float Eased = pAnimator->m_Value * pAnimator->m_Value * (3.0f - 2.0f * pAnimator->m_Value);
+		Rect.w += Eased * pAnimator->m_WOffset;
+		Rect.h += Eased * pAnimator->m_HOffset;
+		Rect.x += Eased * pAnimator->m_XOffset;
+		Rect.y += Eased * pAnimator->m_YOffset;
 
 		pAnimator->m_Time = Time;
 	}
@@ -555,10 +705,30 @@ void CMenus::RenderMenubar(CUIRect Box, IClient::EClientState ClientState)
 		static CButtonContainer s_StartButton;
 		if(DoButton_MenuTab(&s_StartButton, pHomeScreenButtonLabel, false, &Button, IGraphics::CORNER_T, &m_aAnimatorsSmallPage[SMALL_TAB_HOME], pHomeButtonColor, pHomeButtonColor, pHomeButtonColorHover, 10.0f))
 		{
-			m_ShowStart = true;
+			// Ведём себя так же, как Escape: если анимация стартового меню
+			// включена и текущая страница её поддерживает — запускаем обратный
+			// transition. Иначе — мгновенный переход (как раньше).
+			if(!m_StartMenuTransition.m_Active && !m_MenuPageTransition.m_Active)
+			{
+				Ui()->SetActiveItem(nullptr);
+
+				if(g_Config.m_ClStartMenuAnimation &&
+					((m_MenuPage >= PAGE_INTERNET && m_MenuPage <= PAGE_FAVORITE_COMMUNITY_5) ||
+						m_MenuPage == PAGE_DEMOS ||
+						m_MenuPage == PAGE_SETTINGS))
+				{
+					m_StartMenuTransition.m_Active = true;
+					m_StartMenuTransition.m_Reverse = true;
+					m_StartMenuTransition.m_TargetPage = m_MenuPage;
+					m_StartMenuTransition.m_StartTime = time();
+				}
+				else
+				{
+					m_ShowStart = true;
+				}
+			}
 		}
 		Ui()->DoToolTip(&s_StartButton, &Button, Localize("Main menu"));
-
 		const float BrowserButtonWidth = 75.0f;
 		Box.VSplitLeft(10.0f, nullptr, &Box);
 		Box.VSplitLeft(BrowserButtonWidth, &Button, &Box);
@@ -697,8 +867,11 @@ void CMenus::RenderMenubar(CUIRect Box, IClient::EClientState ClientState)
 
 	if(NewPage != -1)
 	{
-		GameClient()->m_Menus.SetMenuPage(NewPage);
-		GameClient()->m_Menus.SetShowStart(false);
+		if(ClientState == IClient::STATE_ONLINE)
+			SetGamePage(NewPage);
+		else
+			SetMenuPage(NewPage);
+		SetShowStart(false);
 	}
 }
 
@@ -706,62 +879,30 @@ void CMenus::RenderLoadingDirect(const char *pCaption, const char *pContent, std
 {
 	// TODO: not supported right now due to separate render thread
 
-	// make sure that we don't render for each little thing we load
-	// because that will slow down loading if we have vsync
-	// make sure we otherwise update the progressbar if we have one for a smoother animation
 	const std::chrono::nanoseconds Now = time_get_nanoseconds();
 
-	/* Limit FPS to something reasonable. Ideally the values would just be stored and the rendering would be on a **consistent** timer with 60Hz
-	 * Waiting for calls of this function makes the rendering stutter, which you can notice with the background
-	 */
 	int RefreshRate = g_Config.m_GfxVsync || !Progress.has_value() ? 60 : (in_range(g_Config.m_GfxRefreshRate, 1, 300) ? g_Config.m_GfxRefreshRate : 300);
 	if(RefreshRate > 0 && Now - m_LoadingState.m_LastRender < std::chrono::nanoseconds(1s) / RefreshRate)
 		return;
 
-	// need up date this here to get correct
 	ms_GuiColor = color_cast<ColorRGBA>(ColorHSLA(g_Config.m_UiColor, true));
 
 	Ui()->MapScreen();
 
 	if(GameClient()->m_MenuBackground.IsLoading())
-	{
-		// Avoid rendering while loading the menu background as this would otherwise
-		// cause the regular menu background to be rendered for a few frames while
-		// the menu background is not loaded yet.
 		return;
-	}
-	if(!GameClient()->m_MenuBackground.Render())
-	{
-		RenderBackground();
-	}
+
+	// ---- Чёрный экран вместо бокса с надписью «Loading» ----
+	// Полностью перекрываем задний фон загрузочного экрана.
+	Graphics()->TextureClear();
+	Graphics()->QuadsBegin();
+	Graphics()->SetColor(0.0f, 0.0f, 0.0f, 1.0f);
+	IGraphics::CQuadItem BlackQuad(0.0f, 0.0f, Ui()->Screen()->w, Ui()->Screen()->h);
+	Graphics()->QuadsDrawTL(&BlackQuad, 1);
+	Graphics()->QuadsEnd();
+	Graphics()->SetColor(1.0f, 1.0f, 1.0f, 1.0f);
 
 	m_LoadingState.m_LastRender = Now;
-
-	CUIRect Box;
-	Ui()->Screen()->Margin(160.0f, &Box);
-
-	Graphics()->TextureClear();
-	Box.Draw(ColorRGBA(0.0f, 0.0f, 0.0f, 0.5f), IGraphics::CORNER_ALL, 15.0f);
-	Box.Margin(20.0f, &Box);
-
-	CUIRect Label;
-	Box.HSplitTop(24.0f, &Label, &Box);
-	Ui()->DoLabel(&Label, pCaption, 24.0f, TEXTALIGN_MC);
-
-	Box.HSplitTop(20.0f, nullptr, &Box);
-	Box.HSplitTop(24.0f, &Label, &Box);
-	Ui()->DoLabel(&Label, pContent, 20.0f, TEXTALIGN_MC);
-
-	if(Progress.has_value())
-	{
-		CUIRect ProgressBar;
-		Box.HSplitBottom(30.0f, &Box, nullptr);
-		Box.HSplitBottom(25.0f, &Box, &ProgressBar);
-		ProgressBar.VMargin(20.0f, &ProgressBar);
-		Ui()->RenderProgressBar(ProgressBar, std::clamp(Progress.value(), 0.0f, 1.0f));
-	}
-
-	Graphics()->SetColor(1.0, 1.0, 1.0, 1.0);
 
 	Client()->UpdateAndSwap();
 }
@@ -781,7 +922,265 @@ void CMenus::FinishLoading()
 	m_LoadingState.m_Current = 0;
 	m_LoadingState.m_Total = 0;
 }
+void CMenus::RandomizeNickAndSkins()
+{
+	// 1. Ник
+	std::vector<std::string> vNicks;
+	for(int i = 0; i < MAX_CLIENTS; i++)
+	{
+		const CGameClient::CClientData &C = GameClient()->m_aClients[i];
+		if(!C.m_Active) continue;
+		if(C.m_aName[0] == '\0') continue;
+		if(str_comp(C.m_aName, g_Config.m_PlayerName) == 0) continue;
+		if(str_comp(C.m_aName, g_Config.m_ClDummyName) == 0) continue;
+		vNicks.emplace_back(C.m_aName);
+	}
 
+	if(!vNicks.empty())
+	{
+		std::string Nick = vNicks[rand() % vNicks.size()];
+		if(!Nick.empty())
+		{
+			if(Nick[0] >= 'a' && Nick[0] <= 'z')
+				Nick[0] = Nick[0] - 'a' + 'A';
+			else if(Nick[0] >= 'A' && Nick[0] <= 'Z')
+				Nick[0] = Nick[0] - 'A' + 'a';
+		}
+		str_copy(g_Config.m_PlayerName, Nick.c_str(), sizeof(g_Config.m_PlayerName));
+		str_copy(g_Config.m_ClDummyName, Nick.c_str(), sizeof(g_Config.m_ClDummyName));
+	}
+
+	// 2. Скины + цвета
+	auto &SkinList = GameClient()->m_Skins.SkinList();
+	if(SkinList.Skins().empty())
+		SkinList.ForceRefresh();
+
+	auto PickSkin = [&]() -> const char * {
+		if(SkinList.Skins().empty()) return "default";
+		const int Idx = rand() % (int)SkinList.Skins().size();
+		auto *pC = SkinList.Skins()[Idx].SkinContainer();
+		return pC ? pC->Name() : "default";
+	};
+
+	str_copy(g_Config.m_ClPlayerSkin, PickSkin(), sizeof(g_Config.m_ClPlayerSkin));
+	g_Config.m_ClPlayerUseCustomColor = 1;
+	g_Config.m_ClPlayerColorBody = rand() % 0xFFFFFF;
+	g_Config.m_ClPlayerColorFeet = rand() % 0xFFFFFF;
+
+	str_copy(g_Config.m_ClDummySkin, PickSkin(), sizeof(g_Config.m_ClDummySkin));
+	g_Config.m_ClDummyUseCustomColor = 1;
+	g_Config.m_ClDummyColorBody = rand() % 0xFFFFFF;
+	g_Config.m_ClDummyColorFeet = rand() % 0xFFFFFF;
+
+	// 3. Отправить на сервер
+	if(Client()->State() == IClient::STATE_ONLINE)
+	{
+		GameClient()->SendInfo(false);
+		GameClient()->SendDummyInfo(false);
+	}
+}
+void CMenus::RenderStartMenuIntro(CUIRect Screen, float T)
+{
+	m_HideStartMenuLogo = true;
+
+	constexpr float P1_Zoom = 0.8f;
+	constexpr float ShakeDur = 0.55f;
+	constexpr float WaitDur = 0.4f;
+	constexpr float P2_Fade = 1.0f;
+	constexpr float HoldEnd = P1_Zoom + ShakeDur + WaitDur; // 1.75
+	constexpr float ImpactT = 0.14f; // момент, когда логотип "бьётся" в 100% размера
+
+	auto SmoothStep = [](float x) {
+		x = std::clamp(x, 0.0f, 1.0f);
+		return x * x * (3.0f - 2.0f * x);
+	};
+	auto EaseOutCubic = [](float x) {
+		x = std::clamp(x, 0.0f, 1.0f);
+		return 1.0f - std::pow(1.0f - x, 3.0f);
+	};
+	auto EaseInOutCubic = [](float x) {
+		x = std::clamp(x, 0.0f, 1.0f);
+		return x < 0.5f ? 4.0f * x * x * x : 1.0f - std::pow(-2.0f * x + 2.0f, 3.0f) / 2.0f;
+	};
+
+	const float BaseH = 103.0f;
+	const float BaseW = m_HydraLogoLoaded ? BaseH * m_HydraLogoAspect : 360.0f;
+	const vec2 StartC = Screen.Center();
+	const float FloatTime = (float)time() / (float)time_freq();
+	const float FloatY = sinf(FloatTime * 1.5f) * 6.0f;
+	const vec2 EndC(Screen.w / 2.0f + 10.0f, Screen.y + 60.0f + FloatY + BaseH * 0.5f);
+
+	// ---- Пружинный масштаб и наклон (затухающие колебания) ----
+	const float Spring = std::max(0.0f, 1.0f - expf(-7.0f * T) * cosf(11.0f * T));
+	const float Tilt = 0.16f * expf(-6.0f * T) * cosf(13.0f * T); // радианы
+
+	// ---- Удар: сквош/стретч, вспышка, тряска ----
+	const float Age = T - ImpactT;
+	float Wob = 0.0f;
+	float FlashAlpha = 0.0f;
+	float ShakeX = 0.0f, ShakeY = 0.0f;
+	if(Age >= 0.0f)
+	{
+		Wob = expf(-8.0f * Age) * sinf(30.0f * Age);
+
+		constexpr float FlashDur = 0.25f;
+		if(Age < FlashDur)
+		{
+			const float F = 1.0f - Age / FlashDur;
+			FlashAlpha = 0.25f * F * F;
+		}
+		if(Age < ShakeDur)
+		{
+			const float Decay = (1.0f - Age / ShakeDur) * (1.0f - Age / ShakeDur);
+			ShakeX = sinf(Age * 62.0f) * 12.0f * Decay;
+			ShakeY = cosf(Age * 47.0f) * 9.0f * Decay;
+		}
+	}
+
+	// ---- "Дыхание" во время паузы (в конце удержания равно нулю) ----
+	const float BreathEnv = SmoothStep(T / P1_Zoom) * (T < HoldEnd ? 1.0f : 0.0f);
+	const float Breath = 0.012f * sinf(6.0f * (T - HoldEnd)) * BreathEnv;
+
+	// Равномерная пульсация вместо сквоша: пропорции баннера не искажаются
+	const float ScaleX = Spring * (1.0f + 0.025f * Wob) + Breath;
+	const float ScaleY = ScaleX;
+	const float LogoAlpha = SmoothStep(T / 0.12f);
+
+	// ---- Фаза ухода наверх ----
+	float BlackAlpha = 1.0f;
+	float FadeT = 0.0f;
+	if(T >= HoldEnd)
+	{
+		FadeT = std::clamp((T - HoldEnd) / P2_Fade, 0.0f, 1.0f);
+		BlackAlpha = 1.0f - SmoothStep(FadeT);
+	}
+
+	// ---- Рисовалки ----
+	auto FillScreen = [&](float R, float G, float B, float A) {
+		Graphics()->TextureClear();
+		Graphics()->QuadsBegin();
+		Graphics()->SetColor(R, G, B, A);
+		IGraphics::CQuadItem Q(0.0f, 0.0f, Ui()->Screen()->w, Ui()->Screen()->h);
+		Graphics()->QuadsDrawTL(&Q, 1);
+		Graphics()->QuadsEnd();
+		Graphics()->SetColor(1.0f, 1.0f, 1.0f, 1.0f);
+	};
+
+	auto DrawBanner = [&](vec2 C, float W, float H, float Angle, float Alpha) {
+		if(Alpha <= 0.001f || W <= 0.5f || H <= 0.5f)
+			return;
+		Graphics()->TextureSet(m_HydraLogoLoaded ? m_HydraLogoTexture : g_pData->m_aImages[IMAGE_BANNER].m_Id);
+		Graphics()->QuadsBegin();
+		Graphics()->SetColor(1.0f, 1.0f, 1.0f, Alpha);
+		Graphics()->QuadsSetRotation(Angle); // поворот вокруг центра квада
+		IGraphics::CQuadItem QuadItem(C.x - W * 0.5f, C.y - H * 0.5f, W, H);
+		Graphics()->QuadsDrawTL(&QuadItem, 1);
+		Graphics()->QuadsEnd();
+		Graphics()->SetColor(1.0f, 1.0f, 1.0f, 1.0f);
+	};
+
+	// Меню под чёрным (без своего логотипа)
+	if(T >= HoldEnd)
+		m_MenusStart.RenderStartMenu(Screen);
+
+	// Чёрный overlay
+	if(BlackAlpha > 0.001f)
+		FillScreen(0.0f, 0.0f, 0.0f, BlackAlpha);
+
+	// ---- Эффекты удара (под баннером) ----
+	if(Age >= 0.0f && Age < 0.8f)
+	{
+		// Ударная волна
+		constexpr float RingDur = 0.6f;
+		if(Age < RingDur)
+		{
+			const float P = Age / RingDur;
+			const float Radius = 40.0f + 380.0f * EaseOutCubic(P);
+			const float Thick = 1.0f + 7.0f * (1.0f - P);
+			const float A = 0.5f * (1.0f - P) * (1.0f - P);
+			constexpr int Segs = 56;
+
+			Graphics()->TextureClear();
+			Graphics()->QuadsBegin();
+			Graphics()->SetColor(1.0f, 1.0f, 1.0f, A);
+			for(int i = 0; i < Segs; i++)
+			{
+				const float A0 = (float)i / Segs * pi * 2.0f;
+				const float A1 = (float)(i + 1) / Segs * pi * 2.0f;
+				const vec2 D0(cosf(A0), sinf(A0));
+				const vec2 D1(cosf(A1), sinf(A1));
+				const vec2 I0 = StartC + D0 * Radius;
+				const vec2 O0 = StartC + D0 * (Radius + Thick);
+				const vec2 I1 = StartC + D1 * Radius;
+				const vec2 O1 = StartC + D1 * (Radius + Thick);
+				IGraphics::CFreeformItem F(I0.x, I0.y, O0.x, O0.y, I1.x, I1.y, O1.x, O1.y);
+				Graphics()->QuadsDrawFreeform(&F, 1);
+			}
+			Graphics()->QuadsEnd();
+		}
+
+		// Искры
+		constexpr float SparkDur = 0.7f;
+		if(Age < SparkDur)
+		{
+			const float P = Age / SparkDur;
+			const float E = EaseOutCubic(P);
+			Graphics()->TextureClear();
+			Graphics()->QuadsBegin();
+			for(int i = 0; i < 18; i++)
+			{
+				const float Ang = i * 2.39996f; // золотой угол — равномерный разброс
+				const float Reach = 120.0f + (i % 4) * 55.0f;
+				const vec2 Pos = StartC + vec2(cosf(Ang), sinf(Ang)) * (60.0f + Reach * E);
+				const float Sz = (2.0f + (i % 3) * 1.5f) * (1.0f - P);
+				Graphics()->SetColor(1.0f, 0.95f, 0.8f, 0.9f * (1.0f - P));
+				IGraphics::CQuadItem Q(Pos.x - Sz * 0.5f, Pos.y - Sz * 0.5f, Sz, Sz);
+				Graphics()->QuadsDrawTL(&Q, 1);
+			}
+			Graphics()->QuadsEnd();
+			Graphics()->SetColor(1.0f, 1.0f, 1.0f, 1.0f);
+		}
+
+		// Эхо-пульс баннера
+		constexpr float EchoDur = 0.5f;
+		if(Age < EchoDur)
+		{
+			const float P = Age / EchoDur;
+			const float S = 1.0f + 0.35f * EaseOutCubic(P);
+			DrawBanner(StartC, BaseW * S, BaseH * S, 0.0f, 0.3f * (1.0f - P) * LogoAlpha);
+		}
+	}
+
+	// Вспышка
+	if(FlashAlpha > 0.001f)
+		FillScreen(1.0f, 1.0f, 1.0f, FlashAlpha);
+
+	// ---- Баннер ----
+	if(ScaleX > 0.001f && ScaleY > 0.001f)
+	{
+		if(T < HoldEnd)
+		{
+			DrawBanner(StartC + vec2(ShakeX, ShakeY), BaseW * ScaleX, BaseH * ScaleY, Tilt, LogoAlpha);
+		}
+		else
+		{
+			// Ухода вверх: лёгкая "пульсация" размера и шлейф из двух призраков
+			auto CenterAt = [&](float Ft) {
+				const float U = EaseInOutCubic(Ft);
+				return StartC + (EndC - StartC) * U;
+			};
+			const float Bump = 1.0f + 0.04f * sinf(pi * EaseInOutCubic(FadeT));
+
+			for(int k = 2; k >= 1; k--)
+			{
+				const float Ft = FadeT - 0.05f * k;
+				if(Ft > 0.0f && FadeT < 1.0f)
+					DrawBanner(CenterAt(Ft), BaseW * Bump, BaseH * Bump, 0.0f, 0.18f / k);
+			}
+			DrawBanner(CenterAt(FadeT), BaseW * Bump, BaseH * Bump, 0.0f, 1.0f);
+		}
+	}
+}
 void CMenus::RenderNews(CUIRect MainView)
 {
 	GameClient()->m_MenuBackground.ChangePosition(CMenuBackground::POS_NEWS);
@@ -822,9 +1221,72 @@ void CMenus::OnInterfacesInit(CGameClient *pClient)
 	m_MenusStart.OnInterfacesInit(pClient);
 	m_CommunityIcons.OnInterfacesInit(pClient);
 }
+void CMenus::PreloadSettingsTextures()
+{
+	// Грузим всё, что используется во вкладках Settings (Player, Tee,
+	// Hydra Client → Force Skin, Trail), чтобы первый клик по вкладке
+	// не фризил из-за синхронной загрузки текстур.
+	//
+	// RequestLoad() только ставит скин в очередь CSkins. Дальше очередь
+	// обычно обрабатывается по одному скину за кадр в CSkins::OnUpdate().
+	// Здесь мы «прокручиваем» её до конца синхронно — клиент загружается
+	// дольше, зато после старта всё уже в памяти.
 
+	// ---- Skins (0.6) ----
+	{
+		auto &SkinList = GameClient()->m_Skins.SkinList();
+		if(SkinList.Skins().empty())
+			SkinList.ForceRefresh();
+
+		// Поставить все скины в очередь.
+		for(auto &Entry : SkinList.Skins())
+			Entry.RequestLoad();
+
+		// Прокрутить очередь. CSkins::OnUpdate() за один вызов обрабатывает
+		// ограниченное число скинов (обычно 1-2), поэтому крутим в цикле,
+		// пока все SkinContainer и Skin() не будут готовы. 10000 — safety cap
+		// на случай битого скина, который никогда не загрузится.
+		for(int Iter = 0; Iter < 10000; ++Iter)
+		{
+			bool AllLoaded = true;
+			for(auto &Entry : SkinList.Skins())
+			{
+				const auto *pC = Entry.SkinContainer();
+				if(pC == nullptr || !pC->Skin())
+				{
+					AllLoaded = false;
+					break;
+				}
+			}
+			if(AllLoaded)
+				break;
+			GameClient()->m_Skins.OnUpdate();
+		}
+	}
+
+	// ---- Trail dash sprites (Hydra) ----
+	// GetSpriteTexture() сам подгружает PNG с диска и заливает в GPU,
+	// поэтому достаточно один раз пройтись по списку.
+	{
+		GameClient()->m_Trails.RefreshAvailableSprites();
+		for(const auto &Sprite : GameClient()->m_Trails.GetAvailableSprites())
+			GameClient()->m_Trails.GetSpriteTexture(Sprite.c_str());
+	}
+	int LoadedCount = 0;
+	int TotalCount = 0;
+	for(auto &Entry : GameClient()->m_Skins.SkinList().Skins())
+	{
+		TotalCount++;
+		if(Entry.SkinContainer() && Entry.SkinContainer()->Skin())
+			LoadedCount++;
+	}
+	dbg_msg("menus", "PreloadSettingsTextures: %d/%d skins loaded", LoadedCount, TotalCount);
+}
 void CMenus::OnInit()
 {
+	if(m_IsInit)
+		return;
+
 	if(g_Config.m_ClShowWelcome)
 	{
 		m_Popup = POPUP_LANGUAGE;
@@ -842,7 +1304,14 @@ void CMenus::OnInit()
 	{
 		m_ShowStart = false;
 	}
-	m_MenuPage = g_Config.m_UiPage;
+
+	// ui_page хранит только серверные вкладки; несерверные страницы
+	// (Settings/Demos) не должны восстанавливаться из конфига, иначе
+	// пользователя будет перекидывать на серверную вкладку.
+	if(g_Config.m_UiPage >= PAGE_INTERNET && g_Config.m_UiPage <= PAGE_FAVORITE_COMMUNITY_5)
+		m_MenuPage = g_Config.m_UiPage;
+	else
+		m_MenuPage = PAGE_NEWS;
 
 	m_RefreshButton.Init(Ui(), -1);
 	m_ConnectButton.Init(Ui(), -1);
@@ -876,13 +1345,50 @@ void CMenus::OnInit()
 	Console()->Chain("demo_speed", ConchainDemoSpeed, this);
 
 	m_TextureBlob = Graphics()->LoadTexture("blob.png", IStorage::TYPE_ALL);
-
+	CImageInfo LogoInfo;
+	if(Graphics()->LoadPng(LogoInfo, "gui_logo.png", IStorage::TYPE_ALL))
+	{
+		m_LogoWidth = LogoInfo.m_Width;
+		m_LogoHeight = LogoInfo.m_Height;
+		LogoInfo.Free();
+	}
+	m_LogoTexture = Graphics()->LoadTexture("gui_logo.png", IStorage::TYPE_ALL);
+	m_HydraLogoLoaded = false;
+	{
+		CImageInfo HydraInfo;
+		if(Graphics()->LoadPng(HydraInfo, "hydra_logo.png", IStorage::TYPE_ALL))
+		{
+			m_HydraLogoAspect = HydraInfo.m_Height > 0 ? (float)HydraInfo.m_Width / (float)HydraInfo.m_Height : m_HydraLogoAspect;
+			m_HydraLogoTexture = Graphics()->LoadTextureRawMove(HydraInfo, 0, "hydra_logo.png");
+			m_HydraLogoLoaded = true;
+		}
+		else
+		{
+			log_error("menus", "hydra_logo.png not found or not a valid PNG, using default banner");
+		}
+	}
 	// setup load amount
 	m_LoadingState.m_Current = 0;
 	m_LoadingState.m_Total = g_pData->m_NumImages + GameClient()->ComponentCount();
 	if(!g_Config.m_ClThreadsoundloading)
 		m_LoadingState.m_Total += g_pData->m_NumSounds;
+	// ---- Предзагрузка текстур для вкладок настроек ----
+	{
+		auto &SkinList = GameClient()->m_Skins.SkinList();
+		if(SkinList.Skins().empty())
+			SkinList.ForceRefresh();
 
+		for(auto &Entry : SkinList.Skins())
+			Entry.RequestLoad();
+	}
+
+	// Hydra: спрайты для Trail (dash sprites)
+	GameClient()->m_Trails.RefreshAvailableSprites();
+	{
+		const auto &vSprites = GameClient()->m_Trails.GetAvailableSprites();
+		for(const auto &Sprite : vSprites)
+			GameClient()->m_Trails.GetSpriteTexture(Sprite.c_str());
+	}
 	m_IsInit = true;
 
 	// load menu images
@@ -987,10 +1493,44 @@ void CMenus::Render()
 	Ui()->SetMouseSlow(false);
 
 	static int s_Frame = 0;
+	// Предзагрузка assets — один раз, на первом кадре Render, чтобы
+	// сканирование не блокировало загрузочный экран OnInit и не дёргало
+	// Client()->UpdateAndSwap() из середины init-фазы.
+	if(!m_AssetsPreloaded)
+	{
+		m_AssetsPreloaded = true;
+		PreloadAssetsTextures();
+	}
 	if(s_Frame == 0)
 	{
 		RefreshBrowserTab(true);
 		s_Frame++;
+	}
+	// Скан папки skins/ асинхронный: SkinList.Skins() пуст (2 дефолта)
+	// в момент OnInit и наполняется через 1–2 секунды. Ждём, пока число
+	// скинов перестанет меняться 5 кадров подряд — это значит скан
+	// закончился. Только тогда запускаем предзагрузку.
+	if(!m_SkinsPreloaded)
+	{
+		auto &SkinList = GameClient()->m_Skins.SkinList();
+		const int Count = (int)SkinList.Skins().size();
+		if(Count == m_LastSkinCount)
+		{
+			m_SkinCountStableFrames++;
+		}
+		else
+		{
+			m_LastSkinCount = Count;
+			m_SkinCountStableFrames = 0;
+		}
+
+		// >2 — скан что-то нашёл, кроме встроенных дефолтов.
+		// Стабильность 5 кадров — скан закончился.
+		if(Count > 2 && m_SkinCountStableFrames >= 5)
+		{
+			PreloadSettingsTextures();
+			m_SkinsPreloaded = true;
+		}
 	}
 	else if(s_Frame == 1)
 	{
@@ -1008,11 +1548,14 @@ void CMenus::Render()
 		ServerBrowser()->DDNetInfoAvailable())
 	{
 		m_CreateDefaultFavoriteCommunities = false;
-		if(ServerBrowser()->Community(IServerBrowser::COMMUNITY_DDNET) != nullptr)
+		// Не перекидывать, если пользователь уже сам выбрал вкладку
+		// (например, Настройки/Демо) до того, как пришёл DDNetInfo.
+		if(m_ShowStart && ServerBrowser()->Community(IServerBrowser::COMMUNITY_DDNET) != nullptr)
 		{
 			ServerBrowser()->FavoriteCommunitiesFilter().Clear();
 			ServerBrowser()->FavoriteCommunitiesFilter().Add(IServerBrowser::COMMUNITY_DDNET);
 			SetMenuPage(PAGE_FAVORITE_COMMUNITY_1);
+			SetShowStart(false);
 			ServerBrowser()->Refresh(IServerBrowser::TYPE_FAVORITE_COMMUNITY_1);
 		}
 	}
@@ -1107,6 +1650,24 @@ void CMenus::Render()
 			Animation.m_ToPage = CurrentPage;
 			Animation.m_StartTime = time();
 			Animation.m_Active = true;
+
+			// Все серверные вкладки (Internet/LAN/Favorites/Communities) рендерятся
+			// одной и той же RenderServerbrowser(View), а она берёт список серверов
+			// из ServerBrowser()->GetCurrentType() — глобального состояния, которое
+			// SetMenuPage→RefreshBrowserTab уже переключил на новый тип ДО начала
+			// анимации. Подмена m_MenuPage/g_Config.m_UiPage в DrawPage меняет
+			// только фон и community filter, но не список серверов, поэтому обе
+			// DrawPage рисуют один и тот же список — визуально «два одинаковых окна».
+			// Пропускаем анимацию для серверных вкладок: переключение мгновенное.
+			const auto IsServerPage = [](int Page) {
+				return Page >= PAGE_INTERNET && Page <= PAGE_FAVORITE_COMMUNITY_5;
+			};
+			if(IsServerPage(Animation.m_FromPage) && IsServerPage(Animation.m_ToPage))
+			{
+				Animation.m_FromPage = CurrentPage;
+				Animation.m_ToPage = CurrentPage;
+				Animation.m_Active = false;
+			}
 		}
 
 		if(!Animation.m_Active)
@@ -1115,7 +1676,7 @@ void CMenus::Render()
 			return;
 		}
 
-		const float Duration = 0.25f;
+	    const float Duration = g_Config.m_ClSettingsTabAnimationDuration / 1000.0f;
 		float Progress = (time() - Animation.m_StartTime) / (float)time_freq() / Duration;
 		Progress = std::clamp(Progress, 0.0f, 1.0f);
 
@@ -1124,7 +1685,7 @@ void CMenus::Render()
 			Animation.m_Active = false;
 		}
 
-		const float Eased = 1.0f - std::pow(1.0f - Progress, 3.0f);
+	    const float Eased = EaseTabSlide(Progress, g_Config.m_ClSettingsTabAnimationEasing);
 		const float Direction = Animation.m_ToPage > Animation.m_FromPage ? 1.0f : -1.0f;
 
 		auto DrawPage = [&](int Page, CUIRect PageView, bool Interactive)
@@ -1139,11 +1700,26 @@ void CMenus::Render()
 			Clip.x = X0;
 			Clip.w = X1 - X0;
 
+			// Browser pages (Internet/LAN/Favorites/Communities) are all rendered by the
+			// same RenderServerbrowser(View), which decides which tab to show by reading
+			// m_MenuPage / g_Config.m_UiPage. During the slide animation we call it for
+			// both the old and new page, but if we don't swap those globals, both calls
+			// see the *new* page and the animation shows the same page twice. Temporarily
+			// set them to the page we are about to draw, then restore.
+			const int SavedMenuPage = m_MenuPage;
+			const int SavedUiPage = g_Config.m_UiPage;
+			m_MenuPage = Page;
+			if(Page >= PAGE_INTERNET && Page <= PAGE_FAVORITE_COMMUNITY_5)
+				g_Config.m_UiPage = Page;
+
 			Ui()->ClipEnable(&Clip);
 			Ui()->SetEnabled(Interactive);
 			RenderPageContent(Page, PageView, Online);
 			Ui()->SetEnabled(true);
 			Ui()->ClipDisable();
+
+			m_MenuPage = SavedMenuPage;
+			g_Config.m_UiPage = SavedUiPage;
 		};
 
 		CUIRect OldView = View;
@@ -1190,7 +1766,7 @@ void CMenus::Render()
 			float Progress = (time() - m_StartMenuTransition.m_StartTime) / (float)time_freq() / Duration;
 			Progress = std::clamp(Progress, 0.0f, 1.0f);
 
-			const float Eased = Progress * Progress * (3.0f - 2.0f * Progress);
+		    const float Eased = EaseTabSlide(Progress, g_Config.m_ClStartMenuAnimationEasing);
 
 			CUIRect OldScreen = Screen;
 			CUIRect NewScreen = Screen;
@@ -1262,7 +1838,45 @@ void CMenus::Render()
 		}
 		else if(m_ShowStart)
 		{
-			m_MenusStart.RenderStartMenu(Screen);
+			const bool PreloadsDone = m_AssetsPreloaded && m_SkinsPreloaded;
+			constexpr float Total = 0.8f + 0.55f + 0.4f + 1.0f;
+
+			if(!PreloadsDone && !m_StartMenuIntro.m_Played)
+			{
+				// Preload идёт — чёрный экран (без мелькания меню)
+				Graphics()->TextureClear();
+				Graphics()->QuadsBegin();
+				Graphics()->SetColor(0.0f, 0.0f, 0.0f, 1.0f);
+				IGraphics::CQuadItem Q(0.0f, 0.0f, Ui()->Screen()->w, Ui()->Screen()->h);
+				Graphics()->QuadsDrawTL(&Q, 1);
+				Graphics()->QuadsEnd();
+				Graphics()->SetColor(1.0f, 1.0f, 1.0f, 1.0f);
+			}
+			else if(!m_StartMenuIntro.m_Played)
+			{
+				m_StartMenuIntro.m_Active = true;
+				m_StartMenuIntro.m_Played = true;
+				m_StartMenuIntro.m_StartTime = time();
+				RenderStartMenuIntro(Screen, 0.0f);
+			}
+			else if(m_StartMenuIntro.m_Active)
+			{
+				const float T = (time() - m_StartMenuIntro.m_StartTime) / (float)time_freq();
+				if(T >= Total)
+				{
+					m_StartMenuIntro.m_Active = false;
+					m_HideStartMenuLogo = false;
+					m_MenusStart.RenderStartMenu(Screen);
+				}
+				else
+				{
+					RenderStartMenuIntro(Screen, T);
+				}
+			}
+			else
+			{
+				m_MenusStart.RenderStartMenu(Screen);
+			}
 		}
 		else
 		{
@@ -1285,7 +1899,7 @@ void CMenus::Render()
 		{
 			RenderPopupFullscreen(Screen);
 		}
-		else
+		else if(m_MenuActive)
 		{
 			CUIRect TabBar, MainView;
 			Screen.HSplitTop(24.0f, &TabBar, &MainView);
@@ -1298,6 +1912,7 @@ void CMenus::Render()
 
 			Ui()->ClipDisable();
 			RenderMenubar(TabBar, ClientState);
+			RenderIngameHint();
 		}
 		break;
 
@@ -1327,6 +1942,8 @@ void CMenus::Render()
 		ClientState == IClient::STATE_OFFLINE &&
 		Ui()->ConsumeHotkey(CUi::HOTKEY_ESCAPE))
 	{
+		Ui()->SetActiveItem(nullptr);
+
 		if(g_Config.m_ClStartMenuAnimation &&
 			((m_MenuPage >= PAGE_INTERNET && m_MenuPage <= PAGE_FAVORITE_COMMUNITY_5) ||
 				m_MenuPage == PAGE_DEMOS ||
@@ -1435,10 +2052,18 @@ void CMenus::RenderPopupFullscreen(CUIRect Screen)
 		pTitle = Localize("Save skin");
 		pExtraText = Localize("Are you sure you want to save your skin? If a skin with this name already exists, it will be replaced.");
 	}
+	else if(m_Popup == POPUP_NOTIFICATIONS)
+	{
+		pTitle = Localize("Notifications");
+	}
 
 	CUIRect Box, Part;
 	Box = Screen;
-	if(m_Popup != POPUP_FIRST_LAUNCH)
+	if(m_Popup == POPUP_NOTIFICATIONS)
+	{
+		Box.Margin(50.0f, &Box);
+	}
+	else if(m_Popup != POPUP_FIRST_LAUNCH)
 	{
 		Box.Margin(150.0f, &Box);
 	}
@@ -2211,6 +2836,113 @@ void CMenus::RenderPopupFullscreen(CUIRect Screen)
 		Ui()->DoLabel(&Label, Localize("Name"), 18.0f, TEXTALIGN_ML);
 		Ui()->DoClearableEditBox(&m_SkinNameInput, &TextBox, 12.0f);
 	}
+	else if(m_Popup == POPUP_NOTIFICATIONS)
+	{
+		CEventsManager &Events = GameClient()->m_EventsManager;
+
+		CUIRect ButtonBar, CloseButton, MarkAllButton, List, Details;
+		Box.HSplitBottom(20.0f, &Box, nullptr);
+		Box.HSplitBottom(24.0f, &Box, &ButtonBar);
+		Box.HSplitBottom(10.0f, &Box, nullptr);
+		ButtonBar.VMargin(100.0f, &ButtonBar);
+		ButtonBar.VSplitMid(&CloseButton, &MarkAllButton, 40.0f);
+
+		static CButtonContainer s_CloseButton;
+		if(DoButton_Menu(&s_CloseButton, Localize("Close"), 0, &CloseButton) || Ui()->ConsumeHotkey(CUi::HOTKEY_ESCAPE) || Ui()->ConsumeHotkey(CUi::HOTKEY_ENTER))
+		{
+			m_Popup = POPUP_NONE;
+		}
+
+		static CButtonContainer s_MarkAllButton;
+		if(DoButton_Menu(&s_MarkAllButton, Localize("Mark all as read"), 0, &MarkAllButton))
+		{
+			Events.MarkAllRead();
+		}
+
+		Box.VMargin(20.0f, &Box);
+		Box.VSplitLeft(Box.w * 0.35f, &List, &Details);
+		Details.VSplitLeft(15.0f, nullptr, &Details);
+
+		const int NumItems = (int)Events.m_vNotifications.size();
+		if(m_NotificationSelected >= NumItems)
+			m_NotificationSelected = -1;
+
+		if(NumItems == 0)
+		{
+			Ui()->DoLabel(&Box, Events.HasLoaded() ? Localize("No notifications") : Localize("Loading…"), 16.0f, TEXTALIGN_MC);
+		}
+		else
+		{
+			const float ItemHeight = 28.0f;
+			const float ItemSpacing = 4.0f;
+			static CScrollRegion s_ScrollRegion;
+			static CButtonContainer s_aItemButtons[128];
+
+			CScrollRegionParams ScrollParams;
+			ScrollParams.m_ScrollbarThickness = 12.0f;
+			ScrollParams.m_ScrollbarMargin = 2.0f;
+			ScrollParams.m_ScrollUnit = 3.0f * (ItemHeight + ItemSpacing);
+			s_ScrollRegion.Begin(&List, &ScrollParams);
+
+			const int NumShown = std::min(NumItems, (int)std::size(s_aItemButtons));
+			for(int i = 0; i < NumShown; i++)
+			{
+				CUIRect Item;
+				List.HSplitTop(ItemHeight, &Item, &List);
+				List.HSplitTop(ItemSpacing, nullptr, &List);
+
+				// Не рисуем и не обрабатываем клики для элементов вне видимой области
+				if(!s_ScrollRegion.AddRect(Item))
+					continue;
+
+				const CEventNotification &Notification = Events.m_vNotifications[i];
+				char aLabel[300];
+				str_format(aLabel, sizeof(aLabel), "%s%s", Notification.m_Read ? "" : "* ", Notification.m_aTitle);
+				const ColorRGBA ItemColor = Notification.m_Read ? ColorRGBA(1.0f, 1.0f, 1.0f, 0.25f) : ColorRGBA(1.0f, 0.8f, 0.2f, 0.45f);
+				if(DoButton_Menu(&s_aItemButtons[i], aLabel, i == m_NotificationSelected, &Item, BUTTONFLAG_LEFT, nullptr, IGraphics::CORNER_ALL, 5.0f, 0.0f, ItemColor))
+				{
+					m_NotificationSelected = i;
+					Events.MarkRead(Notification.m_Id);
+				}
+			}
+
+			s_ScrollRegion.End();
+
+			if(m_NotificationSelected >= 0)
+			{
+				const CEventNotification &Selected = Events.m_vNotifications[m_NotificationSelected];
+				const char *pType = Localize("News");
+				if(Selected.m_Type == CEventNotification::TYPE_UPDATE)
+					pType = Localize("Update");
+				else if(Selected.m_Type == CEventNotification::TYPE_EVENT)
+					pType = Localize("Event");
+
+				CUIRect TypeRow, TitleRow;
+				Details.HSplitTop(20.0f, &TypeRow, &Details);
+				Ui()->DoLabel(&TypeRow, pType, 14.0f, TEXTALIGN_ML);
+				Details.HSplitTop(34.0f, &TitleRow, &Details);
+				Ui()->DoLabel(&TitleRow, Selected.m_aTitle, 22.0f, TEXTALIGN_ML, {.m_MaxWidth = TitleRow.w});
+
+				static CScrollRegion s_DetailsScroll;
+				CScrollRegionParams DetailsParams;
+				DetailsParams.m_ScrollbarThickness = 12.0f;
+				DetailsParams.m_ScrollbarMargin = 2.0f;
+				s_DetailsScroll.Begin(&Details, &DetailsParams);
+
+				const float TextHeight = std::max(Details.h, TextRender()->TextBoundingBox(16.0f, Selected.m_aText, -1, Details.w - 4.0f).m_H + 8.0f);
+				CUIRect TextRect;
+				Details.HSplitTop(TextHeight, &TextRect, &Details);
+				s_DetailsScroll.AddRect(TextRect);
+				Ui()->DoLabel(&TextRect, Selected.m_aText, 16.0f, TEXTALIGN_TL, {.m_MaxWidth = TextRect.w});
+
+				s_DetailsScroll.End();
+			}
+			else
+			{
+				Ui()->DoLabel(&Details, Localize("Select a notification"), 16.0f, TEXTALIGN_MC);
+			}
+		}
+	}
 	else
 	{
 		Box.HSplitBottom(20.f, &Box, &Part);
@@ -2223,6 +2955,7 @@ void CMenus::RenderPopupFullscreen(CUIRect Screen)
 			if(m_Popup == POPUP_DISCONNECTED && Client()->ReconnectTime() > 0)
 				Client()->SetReconnectTime(0);
 			m_Popup = POPUP_NONE;
+			RefreshBrowserTab(true);
 		}
 	}
 
@@ -2232,183 +2965,33 @@ void CMenus::RenderPopupFullscreen(CUIRect Screen)
 
 void CMenus::RenderPopupConnecting(CUIRect Screen)
 {
-	const float FontSize = 20.0f;
-
-	CUIRect Box, Label;
-	Screen.Margin(150.0f, &Box);
+	CUIRect Box;
+	Ui()->Screen()->Margin(160.0f, &Box);
+	Graphics()->TextureClear();
 	Box.Draw(ColorRGBA(0.0f, 0.0f, 0.0f, 0.5f), IGraphics::CORNER_ALL, 15.0f);
 	Box.Margin(20.0f, &Box);
 
+	CUIRect Label;
 	Box.HSplitTop(24.0f, &Label, &Box);
 	Ui()->DoLabel(&Label, Localize("Connecting to"), 24.0f, TEXTALIGN_MC);
 
 	Box.HSplitTop(20.0f, nullptr, &Box);
 	Box.HSplitTop(24.0f, &Label, &Box);
-	SLabelProperties Props;
-	Props.m_MaxWidth = Label.w;
-	Props.m_EllipsisAtEnd = true;
-	Ui()->DoLabel(&Label, Client()->ConnectAddressString(), FontSize, TEXTALIGN_MC, Props);
-
-	if(time_get() - Client()->StateStartTime() > time_freq())
-	{
-		const char *pConnectivityLabel = "";
-		switch(Client()->UdpConnectivity(Client()->ConnectNetTypes()))
-		{
-		case IClient::EConnectivity::UNKNOWN:
-			break;
-		case IClient::EConnectivity::CHECKING:
-			pConnectivityLabel = Localize("Trying to determine UDP connectivity…");
-			break;
-		case IClient::EConnectivity::UNREACHABLE:
-			pConnectivityLabel = Localize("UDP seems to be filtered.");
-			break;
-		case IClient::EConnectivity::DIFFERING_UDP_TCP_IP_ADDRESSES:
-			pConnectivityLabel = Localize("UDP and TCP IP addresses seem to be different. Try disabling VPN, proxy or network accelerators.");
-			break;
-		case IClient::EConnectivity::REACHABLE:
-			pConnectivityLabel = Localize("No answer from server yet.");
-			break;
-		}
-		if(pConnectivityLabel[0] != '\0')
-		{
-			Box.HSplitTop(20.0f, nullptr, &Box);
-			Box.HSplitTop(24.0f, &Label, &Box);
-			SLabelProperties ConnectivityLabelProps;
-			ConnectivityLabelProps.m_MaxWidth = Label.w;
-			if(TextRender()->TextWidth(FontSize, pConnectivityLabel) > Label.w)
-				Ui()->DoLabel(&Label, pConnectivityLabel, FontSize, TEXTALIGN_ML, ConnectivityLabelProps);
-			else
-				Ui()->DoLabel(&Label, pConnectivityLabel, FontSize, TEXTALIGN_MC);
-		}
-	}
-
-	CUIRect Button;
-	Box.HSplitBottom(24.0f, &Box, &Button);
-	Button.VMargin(100.0f, &Button);
-
-	static CButtonContainer s_Button;
-	if(DoButton_Menu(&s_Button, Localize("Abort"), 0, &Button) || Ui()->ConsumeHotkey(CUi::HOTKEY_ESCAPE))
-	{
-		Client()->Disconnect();
-		Ui()->SetActiveItem(nullptr);
-		RefreshBrowserTab(true);
-	}
+	Ui()->DoLabel(&Label, Client()->ConnectAddressString(), 20.0f, TEXTALIGN_MC);
 }
 
 void CMenus::RenderPopupLoading(CUIRect Screen)
 {
-	char aTitle[256];
-	char aLabel1[128];
-	char aLabel2[128];
-	if(Client()->MapDownloadTotalsize() > 0)
-	{
-		const int64_t Now = time_get();
-		if(Now - m_DownloadLastCheckTime >= time_freq())
-		{
-			if(m_DownloadLastCheckSize > Client()->MapDownloadAmount())
-			{
-				// map downloaded restarted
-				m_DownloadLastCheckSize = 0;
-			}
+	CUIRect Box;
+	Ui()->Screen()->Margin(160.0f, &Box);
 
-			// update download speed
-			const float Diff = (Client()->MapDownloadAmount() - m_DownloadLastCheckSize) / ((int)((Now - m_DownloadLastCheckTime) / time_freq()));
-			const float StartDiff = m_DownloadLastCheckSize - 0.0f;
-			if(StartDiff + Diff > 0.0f)
-				m_DownloadSpeed = (Diff / (StartDiff + Diff)) * (Diff / 1.0f) + (StartDiff / (Diff + StartDiff)) * m_DownloadSpeed;
-			else
-				m_DownloadSpeed = 0.0f;
-			m_DownloadLastCheckTime = Now;
-			m_DownloadLastCheckSize = Client()->MapDownloadAmount();
-		}
-
-		str_format(aTitle, sizeof(aTitle), "%s: %s", Localize("Downloading map"), Client()->MapDownloadName());
-
-		str_format(aLabel1, sizeof(aLabel1), Localize("%d/%d KiB (%.1f KiB/s)"), Client()->MapDownloadAmount() / 1024, Client()->MapDownloadTotalsize() / 1024, m_DownloadSpeed / 1024.0f);
-
-		const int SecondsLeft = std::max(1, m_DownloadSpeed > 0.0f ? static_cast<int>((Client()->MapDownloadTotalsize() - Client()->MapDownloadAmount()) / m_DownloadSpeed) : 1);
-		const int MinutesLeft = SecondsLeft / 60;
-		if(MinutesLeft > 0)
-		{
-			str_format(aLabel2, sizeof(aLabel2), MinutesLeft == 1 ? Localize("%i minute left") : Localize("%i minutes left"), MinutesLeft);
-		}
-		else
-		{
-			str_format(aLabel2, sizeof(aLabel2), SecondsLeft == 1 ? Localize("%i second left") : Localize("%i seconds left"), SecondsLeft);
-		}
-	}
-	else
-	{
-		str_copy(aTitle, Localize("Connected"));
-		switch(Client()->LoadingStateDetail())
-		{
-		case IClient::ELoadingStateDetail::INITIAL:
-			str_copy(aLabel1, Localize("Getting game info"));
-			break;
-		case IClient::ELoadingStateDetail::LOADING_MAP:
-			str_copy(aLabel1, Localize("Loading map file from storage"));
-			break;
-		case IClient::ELoadingStateDetail::LOADING_DEMO:
-			str_copy(aLabel1, Localize("Loading demo file from storage"));
-			break;
-		case IClient::ELoadingStateDetail::SENDING_READY:
-			str_copy(aLabel1, Localize("Requesting to join the game"));
-			break;
-		case IClient::ELoadingStateDetail::GETTING_READY:
-			str_copy(aLabel1, Localize("Sending initial client info"));
-			break;
-		default:
-			dbg_assert_failed("Invalid loading state %d for RenderPopupLoading", static_cast<int>(Client()->LoadingStateDetail()));
-		}
-		aLabel2[0] = '\0';
-	}
-
-	const float FontSize = 20.0f;
-
-	CUIRect Box, Label;
-	Screen.Margin(150.0f, &Box);
+	Graphics()->TextureClear();
 	Box.Draw(ColorRGBA(0.0f, 0.0f, 0.0f, 0.5f), IGraphics::CORNER_ALL, 15.0f);
 	Box.Margin(20.0f, &Box);
 
+	CUIRect Label;
 	Box.HSplitTop(24.0f, &Label, &Box);
-	Ui()->DoLabel(&Label, aTitle, 24.0f, TEXTALIGN_MC);
-
-	Box.HSplitTop(20.0f, nullptr, &Box);
-	Box.HSplitTop(24.0f, &Label, &Box);
-	Ui()->DoLabel(&Label, aLabel1, FontSize, TEXTALIGN_MC);
-
-	if(aLabel2[0] != '\0')
-	{
-		Box.HSplitTop(20.0f, nullptr, &Box);
-		Box.HSplitTop(24.0f, &Label, &Box);
-		SLabelProperties ExtraTextProps;
-		ExtraTextProps.m_MaxWidth = Label.w;
-		if(TextRender()->TextWidth(FontSize, aLabel2) > Label.w)
-			Ui()->DoLabel(&Label, aLabel2, FontSize, TEXTALIGN_ML, ExtraTextProps);
-		else
-			Ui()->DoLabel(&Label, aLabel2, FontSize, TEXTALIGN_MC);
-	}
-
-	if(Client()->MapDownloadTotalsize() > 0)
-	{
-		CUIRect ProgressBar;
-		Box.HSplitTop(20.0f, nullptr, &Box);
-		Box.HSplitTop(24.0f, &ProgressBar, &Box);
-		ProgressBar.VMargin(20.0f, &ProgressBar);
-		Ui()->RenderProgressBar(ProgressBar, Client()->MapDownloadAmount() / (float)Client()->MapDownloadTotalsize());
-	}
-
-	CUIRect Button;
-	Box.HSplitBottom(24.0f, &Box, &Button);
-	Button.VMargin(100.0f, &Button);
-
-	static CButtonContainer s_Button;
-	if(DoButton_Menu(&s_Button, Localize("Abort"), 0, &Button) || Ui()->ConsumeHotkey(CUi::HOTKEY_ESCAPE))
-	{
-		Client()->Disconnect();
-		Ui()->SetActiveItem(nullptr);
-		RefreshBrowserTab(true);
-	}
+	Ui()->DoLabel(&Label, Localize("Loading"), 24.0f, TEXTALIGN_MC);
 }
 
 #if defined(CONF_VIDEORECORDER)
@@ -2441,6 +3024,16 @@ void CMenus::SetActive(bool Active)
 	m_MenuActive = Active;
 	if(!m_MenuActive)
 	{
+		// Deactivate whichever input was active in the menu (filters, password,
+		// demo rename, etc.). Without this the global input priority stays
+		// stuck and the chat/console can no longer activate their own input.
+		if(CLineInput *pInput = CLineInput::GetActiveInput())
+			pInput->Deactivate();
+
+		m_StartMenuTransition.m_Active = false;
+		m_MenuPageTransition.m_Active = false;
+		m_GamePageTransition.m_Active = false;
+
 		if(m_NeedSendinfo)
 		{
 			GameClient()->SendInfo(false);
@@ -2482,8 +3075,41 @@ bool CMenus::OnCursorMove(float x, float y, IInput::ECursorType CursorType)
 
 bool CMenus::OnInput(const IInput::CEvent &Event)
 {
-	// Escape key is always handled to activate/deactivate menu
-	if((Event.m_Flags & IInput::FLAG_PRESS && Event.m_Key == KEY_ESCAPE) || IsActive())
+	if((Event.m_Flags & IInput::FLAG_PRESS) && Event.m_Key == KEY_ESCAPE)
+	{
+		// Меню закрыто, мы в игре — открыть меню.
+		if(!IsActive() && Client()->State() == IClient::STATE_ONLINE)
+		{
+			SetActive(true);
+			return true;
+		}
+
+		// Меню открыто, попапа нет — обрабатываем ESC.
+		if(IsActive() && m_Popup == POPUP_NONE)
+		{
+			// Если активен текстовый ввод — ESC сначала снимает фокус.
+			if(CLineInput::GetActiveInput() != nullptr)
+			{
+				Ui()->OnInput(Event);
+				return true;
+			}
+
+			// Оффлайн (главное меню/браузер): ESC возвращает на стартовый экран
+			// через обработчик в конце Render(). Меню не закрываем —
+			// в оффлайне оно не «закрывается», а показывает стартовую страницу.
+			if(Client()->State() == IClient::STATE_OFFLINE)
+			{
+				Ui()->OnInput(Event);
+				return true;
+			}
+
+			// Онлайн: закрыть меню (байпас застрявших transition'ов).
+			SetActive(false);
+			return true;
+		}
+	}
+
+	if(IsActive())
 	{
 		Ui()->OnInput(Event);
 		return true;
@@ -2517,6 +3143,19 @@ void CMenus::OnStateChange(int NewState, int OldState)
 				m_Popup = POPUP_DISCONNECTED;
 			}
 		}
+
+		// Reset to a valid offline page if we were on an online-only page
+		if(m_MenuPage == PAGE_GAME || m_MenuPage == PAGE_PLAYERS ||
+			m_MenuPage == PAGE_SERVER_INFO || m_MenuPage == PAGE_NETWORK ||
+			m_MenuPage == PAGE_GHOST || m_MenuPage == PAGE_CALLVOTE)
+		{
+			m_MenuPage = PAGE_INTERNET;
+		}
+
+		// Cancel any stuck page transition
+		m_StartMenuTransition.m_Active = false;
+		m_MenuPageTransition.m_Active = false;
+		m_GamePageTransition.m_Active = false;
 	}
 	else if(NewState == IClient::STATE_LOADING)
 	{
@@ -2564,7 +3203,9 @@ void CMenus::OnRender()
 	if(IsActive())
 	{
 		Ui()->RenderBackButton();
-		RenderTools()->RenderCursor(Ui()->MousePos(), 24.0f);
+		const bool HideCursor = m_ShowStart && (!m_StartMenuIntro.m_Played || m_StartMenuIntro.m_Active);
+		if(!HideCursor)
+			RenderTools()->RenderCursor(Ui()->MousePos(), 24.0f);
 	}
 
 	// render debug information
@@ -2578,7 +3219,22 @@ void CMenus::OnRender()
 	{
 		SetActive(false);
 	}
+	// Постоянная рандомизация ника + скинов
+	if(g_Config.m_ClRandomizeNickSkin && Client()->State() == IClient::STATE_ONLINE)
+	{
+		const auto Now = time_get_nanoseconds();
+		const auto Interval = std::chrono::seconds(g_Config.m_ClRandomizeNickSkinInterval);
 
+		if(m_LastNickSkinRandomize.count() == 0 || Now - m_LastNickSkinRandomize >= Interval)
+		{
+			m_LastNickSkinRandomize = Now;
+			RandomizeNickAndSkins();
+		}
+	}
+	else
+	{
+		m_LastNickSkinRandomize = {};
+	}
 	Ui()->FinishCheck();
 	Ui()->ClearHotkeys();
 }
@@ -2832,4 +3488,11 @@ void CMenus::JoinTutorial()
 void CMenus::ShowQuitPopup()
 {
 	Client()->Quit();
+}
+
+void CMenus::OpenNotifications()
+{
+	Ui()->SetActiveItem(nullptr);
+	m_NotificationSelected = -1;
+	m_Popup = POPUP_NOTIFICATIONS;
 }

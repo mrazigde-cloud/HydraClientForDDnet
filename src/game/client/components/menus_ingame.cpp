@@ -1642,7 +1642,6 @@ void CMenus::RenderGhost(CUIRect MainView)
 			GameClient()->m_Ghost.SaveGhost(pGhost);
 	}
 }
-
 void CMenus::RenderIngameHint()
 {
 	// With touch controls enabled there is a Close button in the menu and usually no Escape key available.

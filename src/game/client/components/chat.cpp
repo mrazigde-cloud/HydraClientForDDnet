@@ -4,6 +4,7 @@
 #include "chat.h"
 
 #include <base/color.h>
+#include <base/dbg.h>
 #include <base/io.h>
 #include <base/log.h>
 #include <base/log_color.h>
@@ -276,8 +277,23 @@ void CChat::OnInit()
 
 bool CChat::OnInput(const IInput::CEvent &Event)
 {
-	if(m_Mode == MODE_NONE)
-		return false;
+    if(m_Mode == MODE_NONE)
+        return false;
+
+    // RenderCandidates() deactivates the input when the chat input was not
+    // rendered in the previous frame (e.g. a frame where CChat::OnRender
+    // returned early). EnableMode() will not re-activate it because m_Mode
+    // is still not MODE_NONE, and FLAG_TEXT is only generated while an
+    // input is active, so typed characters were silently dropped. Re-activate
+    // it here every time we receive an event.
+    if(!m_Input.IsActive())
+        m_Input.Activate(EInputPriority::CHAT);
+
+	dbg_msg("chat-debug", "mode=%d key=%d flags=0x%x text=\"%s\" activeInput=%p thisInput=%p keybinder=%d consoleActive=%d",
+		(int)m_Mode, Event.m_Key, Event.m_Flags, Event.m_aText,
+		(void *)CLineInput::GetActiveInput(), (void *)&m_Input,
+		(int)GameClient()->m_KeyBinder.IsActive(),
+		(int)GameClient()->m_GameConsole.IsActive());
 
 	if(Event.m_Flags & IInput::FLAG_PRESS && Event.m_Key == KEY_ESCAPE)
 	{

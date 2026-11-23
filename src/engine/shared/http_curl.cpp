@@ -171,6 +171,13 @@ bool CHttpRequestCurl::ConfigureHandle(CURL *pHandle)
 		curl_easy_setopt(pHandle, CURLOPT_POSTFIELDS, m_pBody);
 		curl_easy_setopt(pHandle, CURLOPT_POSTFIELDSIZE, m_BodyLength);
 		break;
+
+	case REQUEST::PUT:
+		Header("Content-Type: application/json");
+		curl_easy_setopt(pHandle, CURLOPT_CUSTOMREQUEST, "PUT");
+		curl_easy_setopt(pHandle, CURLOPT_POSTFIELDS, m_pBody);
+		curl_easy_setopt(pHandle, CURLOPT_POSTFIELDSIZE, (long)m_BodyLength);
+		break;
 	}
 
 	curl_easy_setopt(pHandle, CURLOPT_HTTPHEADER, m_pRequestHeaders);

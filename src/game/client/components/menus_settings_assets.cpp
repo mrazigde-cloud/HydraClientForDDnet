@@ -350,7 +350,46 @@ static int InitSearchList(std::vector<const TName *> &vpSearchList, std::vector<
 	}
 	return vAssetList.size();
 }
+void CMenus::PreloadAssetsTextures()
+{
+	// Синхронно сканируем все папки assets/ и кешируем текстуры в IGraphics.
+	// InitAssetList внутри вызывает Graphics()->LoadTexture() для каждого файла,
+	// поэтому после этого вызова открытие вкладки Assets не будет фризить.
+	//
+	// User.m_LoadedFunc не задаём: RenderLoading нельзя вызывать из OnInit
+	// (цикл рендера ещё не запущен), а загрузка тут быстрая.
 
+	SMenuAssetScanUser User;
+	User.m_pUser = this;
+	// Пустой callback: мы вызываем preload из OnInit, до старта render loop.
+	// Если оставить m_LoadedFunc пустым, InitAssetList() при сканировании
+	// длиной >500мс попытается вызвать пустой std::function → std::bad_function_call
+	// → std::terminate (краш). RenderLoading() тут тоже нельзя: он вызывает
+	// Client()->UpdateAndSwap(), что небезопасно во время OnInit.
+	User.m_LoadedFunc = []() {};
+
+	// Entities
+	if(m_vEntitiesList.empty())
+	{
+		SCustomEntities EntitiesItem;
+		str_copy(EntitiesItem.m_aName, "default");
+		LoadEntities(&EntitiesItem, &User);
+		m_vEntitiesList.push_back(EntitiesItem);
+		Storage()->ListDirectory(IStorage::TYPE_ALL, "assets/entities", EntitiesScan, &User);
+		std::sort(m_vEntitiesList.begin(), m_vEntitiesList.end());
+	}
+
+	// Остальные категории
+	InitAssetList(m_vGameList, "assets/game", "game", GameScan, Graphics(), Storage(), &User);
+	InitAssetList(m_vEmoticonList, "assets/emoticons", "emoticons", EmoticonsScan, Graphics(), Storage(), &User);
+	InitAssetList(m_vParticlesList, "assets/particles", "particles", ParticlesScan, Graphics(), Storage(), &User);
+	InitAssetList(m_vHudList, "assets/hud", "hud", HudScan, Graphics(), Storage(), &User);
+	InitAssetList(m_vExtrasList, "assets/extras", "extras", ExtrasScan, Graphics(), Storage(), &User);
+
+	dbg_msg("menus", "PreloadAssetsTextures: entities=%d game=%d emoticons=%d particles=%d hud=%d extras=%d",
+		(int)m_vEntitiesList.size(), (int)m_vGameList.size(), (int)m_vEmoticonList.size(),
+		(int)m_vParticlesList.size(), (int)m_vHudList.size(), (int)m_vExtrasList.size());
+}
 void CMenus::RenderSettingsAssets(CUIRect MainView)
 {
 	CUIRect TabBar, CustomList, QuickSearch, DirectoryButton, ReloadButton;

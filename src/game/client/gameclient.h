@@ -71,6 +71,8 @@
 #include "components/voting.h"
 #include "components/weather.h"
 
+#include "components/events_manager.h"
+
 #include <memory>
 #include <vector>
 
@@ -151,6 +153,7 @@ enum class EClientIdFormat
 class CGameClient : public IGameClient
 {
 public:
+	CEventsManager m_EventsManager;
 	// all components
 	CInfoMessages m_InfoMessages;
 	CCamera m_Camera;

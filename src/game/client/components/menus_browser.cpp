@@ -261,7 +261,7 @@ void CMenus::RenderServerbrowserServerList(CUIRect View, bool &WasListboxItemAct
 	}
 
 	s_ListBox.SetActive(!Ui()->IsPopupOpen());
-	s_ListBox.DoStart(ms_ListheaderHeight, NumServers, 1, 3, -1, &View, false);
+	s_ListBox.DoStart(ms_ListheaderHeight + 3.0f, NumServers, 1, 3, -1, &View, false);
 
 	if(m_ServerBrowserShouldRevealSelection)
 	{
@@ -515,8 +515,13 @@ void CMenus::RenderServerbrowserStatusBox(CUIRect StatusBox, bool WasListboxItem
 	if(SearchInfoAndAddr.w > 350.0f)
 		SearchInfoAndAddr.VSplitLeft(350.0f, &SearchInfoAndAddr, nullptr);
 	SearchInfoAndAddr.HSplitTop(40.0f, &SearchAndInfo, &ServerAddr);
-	ServersAndConnect.HSplitTop(35.0f, &ServersPlayersOnline, &ConnectButtons);
+	if(ServerAddr.h > 25.0f)
+		ServerAddr.h = 25.0f;
+	const float PlayersOnlineHeight = std::min(20.0f, StatusBox.h * 0.25f);
+	ServersAndConnect.HSplitTop(PlayersOnlineHeight, &ServersPlayersOnline, &ConnectButtons);
 	ConnectButtons.HSplitTop(5.0f, nullptr, &ConnectButtons);
+	if(ConnectButtons.h < 20.0f)
+		ConnectButtons.h = 20.0f;
 
 	CUIRect QuickSearch, QuickExclude;
 	SearchAndInfo.HSplitTop(20.0f, &QuickSearch, &QuickExclude);
@@ -614,26 +619,81 @@ void CMenus::RenderServerbrowserStatusBox(CUIRect StatusBox, bool WasListboxItem
 
 	// buttons
 	{
-		CUIRect ButtonRefresh, ButtonConnect;
-		ConnectButtons.VSplitMid(&ButtonRefresh, &ButtonConnect, 5.0f);
+		constexpr float Gap = 5.0f;
+		constexpr float OutlineThickness = 2.0f;
+		constexpr int OutlineCorners = IGraphics::CORNER_ALL;
+		constexpr float OutlineRounding = 4.0f;
+		constexpr float ButtonRounding = 1.5f;
+
+		const float HalfWidth = (ConnectButtons.w - Gap) / 2.0f;
+		const float SquareSize = std::min(ConnectButtons.h * 1.6f, HalfWidth * 0.85f);
+		const float RefreshHeight = SquareSize * 0.75f;
+
+		CUIRect RefreshArea, ConnectArea;
+		ConnectButtons.VSplitMid(&RefreshArea, &ConnectArea, Gap);
+
+		const float ButtonY = ConnectButtons.y + (ConnectButtons.h - SquareSize) / 2.0f;
+
+		CUIRect ButtonRefresh{
+			RefreshArea.x + (RefreshArea.w - SquareSize) / 2.0f,
+			ButtonY + (SquareSize - RefreshHeight) / 2.0f,
+			SquareSize, RefreshHeight};
+		CUIRect ButtonConnect{
+			ConnectArea.x + (ConnectArea.w - SquareSize) / 2.0f,
+			ButtonY + (SquareSize - RefreshHeight) / 2.0f,
+			SquareSize, RefreshHeight};
+
+		static SUIAnimator s_RefreshAnimator;
+		s_RefreshAnimator.m_WOffset = 5.0f;
+		s_RefreshAnimator.m_HOffset = 5.0f;
+
+		static SUIAnimator s_ConnectAnimator;
+		s_ConnectAnimator.m_WOffset = 5.0f;
+		s_ConnectAnimator.m_HOffset = 5.0f;
+
+		// outline refresh
+		{
+			const float V = s_RefreshAnimator.m_Value;
+			const float Eased = V * V * (3.0f - 2.0f * V);
+			const float ExpandW = Eased * s_RefreshAnimator.m_WOffset;
+			const float ExpandH = Eased * s_RefreshAnimator.m_HOffset;
+			CUIRect Outline{
+				ButtonRefresh.x - OutlineThickness - ExpandW * 0.5f,
+				ButtonRefresh.y - OutlineThickness - ExpandH * 0.5f,
+				ButtonRefresh.w + (OutlineThickness + ExpandW * 0.5f) * 2.0f,
+				ButtonRefresh.h + (OutlineThickness + ExpandH * 0.5f) * 2.0f};
+			Outline.Draw(ColorRGBA(1.0f, 1.0f, 1.0f, 0.8f), OutlineCorners, OutlineRounding);
+		}
+		// outline connect
+		{
+			const float V = s_ConnectAnimator.m_Value;
+			const float Eased = V * V * (3.0f - 2.0f * V);
+			const float ExpandW = Eased * s_ConnectAnimator.m_WOffset;
+			const float ExpandH = Eased * s_ConnectAnimator.m_HOffset;
+			CUIRect Outline{
+				ButtonConnect.x - OutlineThickness - ExpandW * 0.5f,
+				ButtonConnect.y - OutlineThickness - ExpandH * 0.5f,
+				ButtonConnect.w + (OutlineThickness + ExpandW * 0.5f) * 2.0f,
+				ButtonConnect.h + (OutlineThickness + ExpandH * 0.5f) * 2.0f};
+			Outline.Draw(ColorRGBA(0.5f, 1.0f, 0.5f, 0.8f), OutlineCorners, OutlineRounding);
+		}
 
 		// refresh button
 		{
 			char aLabelBuf[32] = {0};
-			const auto &&RefreshLabelFunc = [this, aLabelBuf]() mutable {
-				if(ServerBrowser()->IsRefreshing() || ServerBrowser()->IsGettingServerlist())
-					str_format(aLabelBuf, sizeof(aLabelBuf), "%s%s", FontIcon::ARROW_ROTATE_RIGHT, FontIcon::ELLIPSIS);
-				else
-					str_copy(aLabelBuf, FontIcon::ARROW_ROTATE_RIGHT);
-				return aLabelBuf;
-			};
-
-			SMenuButtonProperties Props;
-			Props.m_HintRequiresStringCheck = true;
-			Props.m_UseIconFont = true;
+			if(ServerBrowser()->IsRefreshing() || ServerBrowser()->IsGettingServerlist())
+				str_format(aLabelBuf, sizeof(aLabelBuf), "%s%s", FontIcon::ARROW_ROTATE_RIGHT, FontIcon::ELLIPSIS);
+			else
+				str_copy(aLabelBuf, FontIcon::ARROW_ROTATE_RIGHT);
 
 			static CButtonContainer s_RefreshButton;
-			if(Ui()->DoButton_Menu(m_RefreshButton, &s_RefreshButton, RefreshLabelFunc, &ButtonRefresh, Props) || (!Ui()->IsPopupOpen() && (Input()->KeyPress(KEY_F5) || (Input()->KeyPress(KEY_R) && Input()->ModifierIsPressed()))))
+			TextRender()->SetFontPreset(EFontPreset::ICON_FONT);
+			TextRender()->SetRenderFlags(ETextRenderFlags::TEXT_RENDER_FLAG_ONLY_ADVANCE_WIDTH | ETextRenderFlags::TEXT_RENDER_FLAG_NO_X_BEARING | ETextRenderFlags::TEXT_RENDER_FLAG_NO_Y_BEARING | ETextRenderFlags::TEXT_RENDER_FLAG_NO_PIXEL_ALIGNMENT | ETextRenderFlags::TEXT_RENDER_FLAG_NO_OVERSIZE);
+			const bool RefreshClicked = DoButton_Menu(&s_RefreshButton, aLabelBuf, 0, &ButtonRefresh, BUTTONFLAG_LEFT, nullptr, IGraphics::CORNER_ALL, ButtonRounding, 0.15f, ColorRGBA(0.1f, 0.1f, 0.1f, 0.9f), nullptr, &s_RefreshAnimator);
+			TextRender()->SetRenderFlags(0);
+			TextRender()->SetFontPreset(EFontPreset::DEFAULT_FONT);
+
+			if(RefreshClicked || (!Ui()->IsPopupOpen() && (Input()->KeyPress(KEY_F5) || (Input()->KeyPress(KEY_R) && Input()->ModifierIsPressed()))))
 			{
 				RefreshBrowserTab(true);
 			}
@@ -641,14 +701,14 @@ void CMenus::RenderServerbrowserStatusBox(CUIRect StatusBox, bool WasListboxItem
 
 		// connect button
 		{
-			const auto &&ConnectLabelFunc = []() { return FontIcon::RIGHT_TO_BRACKET; };
-
-			SMenuButtonProperties Props;
-			Props.m_UseIconFont = true;
-			Props.m_Color = ColorRGBA(0.5f, 1.0f, 0.5f, 0.5f);
-
 			static CButtonContainer s_ConnectButton;
-			if(Ui()->DoButton_Menu(m_ConnectButton, &s_ConnectButton, ConnectLabelFunc, &ButtonConnect, Props) || WasListboxItemActivated || (!Ui()->IsPopupOpen() && Ui()->ConsumeHotkey(CUi::HOTKEY_ENTER)))
+			TextRender()->SetFontPreset(EFontPreset::ICON_FONT);
+			TextRender()->SetRenderFlags(ETextRenderFlags::TEXT_RENDER_FLAG_ONLY_ADVANCE_WIDTH | ETextRenderFlags::TEXT_RENDER_FLAG_NO_X_BEARING | ETextRenderFlags::TEXT_RENDER_FLAG_NO_Y_BEARING | ETextRenderFlags::TEXT_RENDER_FLAG_NO_PIXEL_ALIGNMENT | ETextRenderFlags::TEXT_RENDER_FLAG_NO_OVERSIZE);
+			const bool ConnectClicked = DoButton_Menu(&s_ConnectButton, FontIcon::RIGHT_TO_BRACKET, 0, &ButtonConnect, BUTTONFLAG_LEFT, nullptr, IGraphics::CORNER_ALL, ButtonRounding, 0.15f, ColorRGBA(0.1f, 0.3f, 0.1f, 0.9f), nullptr, &s_ConnectAnimator);
+			TextRender()->SetRenderFlags(0);
+			TextRender()->SetFontPreset(EFontPreset::DEFAULT_FONT);
+
+			if(ConnectClicked || WasListboxItemActivated || (!Ui()->IsPopupOpen() && Ui()->ConsumeHotkey(CUi::HOTKEY_ENTER)))
 			{
 				Connect(g_Config.m_UiServerAddress);
 			}
@@ -1860,7 +1920,7 @@ void CMenus::RenderServerbrowser(CUIRect MainView)
 	}
 
 	ToolBox.HSplitTop(24.0f, &TabBar, &ToolBox);
-	ServerList.HSplitBottom(65.0f, &ServerList, &StatusBox);
+	ServerList.HSplitBottom(90.0f, &ServerList, &StatusBox);
 
 	bool WasListboxItemActivated;
 	RenderServerbrowserServerList(ServerList, WasListboxItemActivated);

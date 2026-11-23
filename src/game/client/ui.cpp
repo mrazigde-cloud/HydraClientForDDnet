@@ -166,6 +166,9 @@ void CUi::OnElementsReset()
 	{
 		ResetUIElement(*pEl);
 	}
+	m_pHotScrollRegion = nullptr;
+	m_pBecomingHotScrollRegion = nullptr;
+	m_pLastScrollRegionForMomentum = nullptr;
 }
 
 void CUi::OnWindowResize()
@@ -186,6 +189,8 @@ void CUi::OnCursorMove(float X, float Y)
 
 void CUi::Update()
 {
+	if(!m_TouchState.m_AnyPressed && !Input()->TouchFingerStates().empty())
+		m_pLastScrollRegionForMomentum = nullptr;
 	const vec2 WindowSize = vec2(Graphics()->WindowWidth(), Graphics()->WindowHeight());
 	const CUIRect *pScreen = Screen();
 
@@ -219,19 +224,9 @@ void CUi::Update()
 				if(m_pHotScrollRegion != nullptr)
 				{
 					m_pHotScrollRegion->ScrollRelativeDirect(-m_TouchState.m_ScrollAmount * pScreen->Size());
+					m_pLastScrollRegionForMomentum = m_pHotScrollRegion;
 				}
 				m_TouchState.m_ScrollAmount = vec2(0.0f, 0.0f);
-			}
-
-			// We need to delay the click until the next update or it's not possible to use UI
-			// elements because click and hover would happen at the same time for touch events.
-			if(m_TouchState.m_PrimaryPressed)
-			{
-				UpdatedMouseButtonsNext |= 1;
-			}
-			if(m_TouchState.m_SecondaryPressed)
-			{
-				UpdatedMouseButtonsNext |= 2;
 			}
 		}
 	}
@@ -250,6 +245,93 @@ void CUi::Update()
 	m_pHotScrollRegion = m_pBecomingHotScrollRegion;
 	m_pBecomingHotScrollRegion = nullptr;
 
+	// Handle mouse drag scrolling for scroll regions (PC).
+	if(Enabled() && !m_TouchState.m_AnyPressed)
+	{
+		const bool LeftPressed = (m_MouseButtons & 1) != 0;
+		const bool LeftWasPressed = (m_LastMouseButtons & 1) != 0;
+
+		if(LeftPressed && !LeftWasPressed)
+		{
+			m_MouseDragScrollStart = m_MousePos;
+			m_MouseDragScrollMoved = false;
+			m_MouseDragVelocity = vec2(0.0f, 0.0f);
+			m_MouseDragMomentum = vec2(0.0f, 0.0f);
+		}
+		else if(LeftPressed && LeftWasPressed)
+		{
+			const bool ScrollbarActive = m_pLastActiveScrollbar != nullptr && CheckActiveItem(m_pLastActiveScrollbar);
+			if(!m_MouseDragScrollMoved && !ScrollbarActive && m_pHotScrollRegion != nullptr &&
+				length(m_MousePos - m_MouseDragScrollStart) > (float)g_Config.m_ClScrollDragThreshold)
+			{
+				m_MouseDragScrollMoved = true;
+				SetActiveItem(nullptr);
+			}
+			if(m_MouseDragScrollMoved && m_pHotScrollRegion != nullptr)
+			{
+				const vec2 ScreenDelta = m_MouseDelta * pScreen->Size() / WindowSize;
+				m_pHotScrollRegion->ScrollRelativeDirect(-ScreenDelta);
+				m_pMouseDragRegion = m_pHotScrollRegion;
+
+				const float dt = Client()->RenderFrameTime();
+				if(dt > 0.0f)
+					m_MouseDragVelocity = m_MouseDelta * pScreen->Size() / WindowSize / dt;
+			}
+		}
+		else if(!LeftPressed && LeftWasPressed)
+		{
+			if(m_MouseDragScrollMoved && g_Config.m_ClTouchScrollSmooth == 2 && length(m_MouseDragVelocity) > (float)g_Config.m_ClScrollMouseThreshold)
+				m_MouseDragMomentum = m_MouseDragVelocity * (g_Config.m_ClScrollInertiaStrength / 100.0f * 0.5f);
+			m_MouseDragScrollMoved = false;
+			m_MouseDragVelocity = vec2(0.0f, 0.0f);
+		}
+	}
+	// Wheel scrolling cancels any running inertia
+	if((m_HotkeysPressed & (HOTKEY_SCROLL_UP | HOTKEY_SCROLL_DOWN)) != 0)
+	{
+		m_MouseDragMomentum = vec2(0.0f, 0.0f);
+		m_MouseDragVelocity = vec2(0.0f, 0.0f);
+		m_TouchState.m_ScrollMomentum = vec2(0.0f, 0.0f);
+		m_TouchState.m_ScrollVelocity = vec2(0.0f, 0.0f);
+		m_pMouseDragRegion = nullptr;
+		m_pLastScrollRegionForMomentum = nullptr;
+	}
+	// Apply mouse drag inertia.
+	if(g_Config.m_ClTouchScrollSmooth == 2 && !m_MouseDragScrollMoved && m_MouseDragMomentum != vec2(0.0f, 0.0f))
+	{
+		if(m_pMouseDragRegion != nullptr)
+		{
+			const float dt = Client()->RenderFrameTime();
+			m_pMouseDragRegion->ScrollRelativeDirect(-m_MouseDragMomentum * dt * (g_Config.m_ClScrollInertiaSpeed / 100.0f));
+			m_MouseDragMomentum *= std::max(0.0f, 1.0f - dt * 3.0f * (g_Config.m_ClScrollInertiaDecay / 100.0f));
+			if(length(m_MouseDragMomentum) < 10.0f)
+				m_MouseDragMomentum = vec2(0.0f, 0.0f);
+		}
+		else
+		{
+			m_MouseDragMomentum = vec2(0.0f, 0.0f);
+		}
+	}
+		if(g_Config.m_ClTouchScrollSmooth == 2 && !m_TouchState.m_AnyPressed && m_TouchState.m_ScrollMomentum != vec2(0.0f, 0.0f))
+		{
+						CScrollRegion *pRegion = m_pLastScrollRegionForMomentum ? m_pLastScrollRegionForMomentum : m_pHotScrollRegion;
+			if(pRegion != nullptr)
+			{
+				const float dt = Client()->RenderFrameTime();
+				pRegion->ScrollRelativeDirect(-m_TouchState.m_ScrollMomentum * pScreen->Size() * dt * 2.0f * (g_Config.m_ClScrollInertiaSpeed / 100.0f));
+				m_TouchState.m_ScrollMomentum *= std::max(0.0f, 1.0f - dt * 1.8f * (g_Config.m_ClScrollInertiaDecay / 100.0f));
+				if(length(m_TouchState.m_ScrollMomentum) < 0.01f)
+					m_TouchState.m_ScrollMomentum = vec2(0.0f, 0.0f);
+			}
+			else
+			{
+				m_TouchState.m_ScrollMomentum = vec2(0.0f, 0.0f);
+			}
+		}
+		else if(!m_TouchState.m_AnyPressed && m_TouchState.m_ScrollMomentum == vec2(0.0f, 0.0f))
+		{
+			m_pLastScrollRegionForMomentum = nullptr;
+		}
 	if(Enabled())
 	{
 		CLineInput *pActiveInput = CLineInput::GetActiveInput();
@@ -356,38 +438,54 @@ void CUi::UpdateTouchState(CTouchState &State) const
 		}
 	}
 
-	// Handle two fingers being moved roughly in same direction as a scrolling gesture.
-	if(vTouchFingerStates.size() == 2)
+	// Handle one finger being moved as a scrolling gesture.
+	if(vTouchFingerStates.size() == 1)
 	{
-		const vec2 Delta0 = vTouchFingerStates[0].m_Delta;
-		const vec2 Delta1 = vTouchFingerStates[1].m_Delta;
-		const float Similarity = dot(normalize(Delta0), normalize(Delta1));
-		const float SimilarityThreshold = 0.8f; // How parallel the deltas have to be (1.0f being completely parallel)
-		if(Similarity > SimilarityThreshold)
-		{
-			const float DirectionThreshold = 3.0f; // How much longer the delta of one axis has to be compared to other axis
+		const vec2 Delta = vTouchFingerStates[0].m_Delta;
+		const float DirectionThreshold = 3.0f;
 
-			// Vertical scrolling (y-delta must be larger than x-delta)
-			if(absolute(Delta0.y) > DirectionThreshold * absolute(Delta0.x) &&
-				absolute(Delta1.y) > DirectionThreshold * absolute(Delta1.x) &&
-				Delta0.y * Delta1.y > 0.0f) // Same y direction required
-			{
-				// Accumulate average delta of the two fingers
-				State.m_ScrollAmount.y += (Delta0.y + Delta1.y) / 2.0f;
-			}
-			else if(absolute(Delta0.x) > DirectionThreshold * absolute(Delta0.y) && // Horizontal scrolling (x-delta must be larger than y-delta)
-				absolute(Delta1.x) > DirectionThreshold * absolute(Delta1.y) &&
-				Delta0.x * Delta1.x > 0.0f) // Same x direction required
-			{
-				// Accumulate average delta of the two fingers
-				State.m_ScrollAmount.x += (Delta0.x + Delta1.x) / 2.0f;
-			}
-		}
+		if(absolute(Delta.y) > DirectionThreshold * absolute(Delta.x))
+			State.m_ScrollAmount.y += Delta.y;
+		else if(absolute(Delta.x) > DirectionThreshold * absolute(Delta.y))
+			State.m_ScrollAmount.x += Delta.x;
 	}
 	else
 	{
-		// Scrolling gesture should start from zero again if released.
 		State.m_ScrollAmount = vec2(0.0f, 0.0f);
+	}
+	// Track finger velocity for inertia on release.
+	if(vTouchFingerStates.size() == 1)
+	{
+		const float dt = Client()->RenderFrameTime();
+		if(dt > 0.0f)
+			State.m_ScrollVelocity = vTouchFingerStates[0].m_Delta / dt;
+	}
+	else if(State.m_AnyPressed)
+	{
+		State.m_ScrollVelocity = vec2(0.0f, 0.0f);
+	}
+
+	// On release: start inertia once.
+	if(WasAnyPressed && !State.m_AnyPressed)
+	{
+		if(g_Config.m_ClTouchScrollSmooth == 2 && length(State.m_ScrollVelocity) > 0.15f)
+			State.m_ScrollMomentum = State.m_ScrollVelocity * (g_Config.m_ClScrollInertiaStrength / 100.0f * 1.5f);
+		else
+			State.m_ScrollMomentum = vec2(0.0f, 0.0f);
+		State.m_ScrollVelocity = vec2(0.0f, 0.0f);
+	}
+
+	// New touch cancels momentum.
+	if(!WasAnyPressed && State.m_AnyPressed)
+	{
+		State.m_ScrollMomentum = vec2(0.0f, 0.0f);
+	}
+	// Finger moved → not a click.
+	if(vTouchFingerStates.size() == 1 && State.m_PrimaryPressed)
+	{
+		const float MoveThreshold = 0.005f;
+		if(length(vTouchFingerStates[0].m_Delta) > MoveThreshold)
+			State.m_PrimaryPressed = false;
 	}
 }
 
@@ -526,6 +624,8 @@ void CUi::UpdateClipping()
 
 int CUi::DoButtonLogic(const void *pId, int Checked, const CUIRect *pRect, const unsigned Flags)
 {
+	if(m_MouseDragScrollMoved)
+		return 0;
 	int ReturnValue = 0;
 	const bool Inside = MouseHovered(pRect);
 
@@ -563,6 +663,8 @@ int CUi::DoButtonLogic(const void *pId, int Checked, const CUIRect *pRect, const
 
 int CUi::DoDraggableButtonLogic(const void *pId, int Checked, const CUIRect *pRect, bool *pClicked, bool *pAbrupted)
 {
+	if(m_MouseDragScrollMoved)
+		return 0;
 	// logic
 	int ReturnValue = 0;
 	const bool Inside = MouseHovered(pRect);
@@ -982,6 +1084,9 @@ bool CUi::DoEditBox(CLineInput *pLineInput, const CUIRect *pRect, float FontSize
 		pLineInput->Activate(EInputPriority::UI);
 	else
 		pLineInput->Deactivate();
+	// ввод. Позиция в пикселях — pRect уже в экранных координатах.
+	if(pLineInput->IsActive())
+		Input()->SetCompositionWindowPosition(pRect->x, pRect->y, pRect->h);
 
 	float ScrollOffset = pLineInput->GetScrollOffset();
 	float ScrollOffsetChange = pLineInput->GetScrollOffsetChange();
@@ -1083,12 +1188,16 @@ bool CUi::DoEditBox_Search(CLineInput *pLineInput, const CUIRect *pRect, float F
 	pLineInput->SetEmptyText(Localize("Search"));
 	return DoClearableEditBox(pLineInput, &QuickSearch, FontSize);
 }
-
 int CUi::DoButton_Menu(CUIElement &UIElement, const CButtonContainer *pId, const std::function<const char *()> &GetTextLambda, const CUIRect *pRect, const SMenuButtonProperties &Props)
 {
 	CUIRect Text = *pRect, DropDownIcon;
 	Text.HMargin(pRect->h >= 20.0f ? 2.0f : 1.0f, &Text);
 	Text.HMargin((Text.h * Props.m_FontFactor) / 2.0f, &Text);
+	if(Text.h <= 0.0f)
+	{
+		Text = *pRect;
+		Text.Margin(1.0f, &Text);
+	}
 	if(Props.m_ShowDropDownIcon)
 	{
 		Text.VSplitRight(pRect->h * 0.25f, &Text, nullptr);
@@ -1097,7 +1206,7 @@ int CUi::DoButton_Menu(CUIElement &UIElement, const CButtonContainer *pId, const
 
 	if(!UIElement.AreRectsInit() || Props.m_HintRequiresStringCheck || Props.m_HintCanChangePositionOrSize || !UIElement.Rect(0)->m_UITextContainer.Valid())
 	{
-		bool NeedsRecalc = !UIElement.AreRectsInit() || !UIElement.Rect(0)->m_UITextContainer.Valid();
+		bool NeedsRecalc = !UIElement.AreRectsInit() || !UIElement.Rect(0)->m_UITextContainer.Valid() || UIElement.Rect(0)->m_Cursor.m_FontSize < 1.0f;
 		if(Props.m_HintCanChangePositionOrSize)
 		{
 			if(UIElement.AreRectsInit())
@@ -1148,22 +1257,20 @@ int CUi::DoButton_Menu(CUIElement &UIElement, const CButtonContainer *pId, const
 				NewRect.m_Height = pRect->h;
 				NewRect.m_Rounding = Props.m_Rounding;
 				NewRect.m_Corners = Props.m_Corners;
-				if(i == 0)
-				{
-					if(pText == nullptr)
-						pText = GetTextLambda();
-					NewRect.m_Text = pText;
-					if(Props.m_UseIconFont)
-						TextRender()->SetFontPreset(EFontPreset::ICON_FONT);
-					DoLabel(NewRect, &Text, pText, Text.h * CUi::ms_FontmodHeight, TEXTALIGN_MC);
-					if(Props.m_UseIconFont)
-						TextRender()->SetFontPreset(EFontPreset::DEFAULT_FONT);
-				}
+
+				if(pText == nullptr)
+					pText = GetTextLambda();
+				NewRect.m_Text = pText;
+				if(Props.m_UseIconFont)
+					TextRender()->SetFontPreset(EFontPreset::ICON_FONT);
+				DoLabel(NewRect, &Text, pText, Text.h * CUi::ms_FontmodHeight, TEXTALIGN_MC);
+				if(Props.m_UseIconFont)
+					TextRender()->SetFontPreset(EFontPreset::DEFAULT_FONT);
 			}
 			Graphics()->SetColor(1.0f, 1.0f, 1.0f, 1.0f);
 		}
 	}
-	// render
+
 	size_t Index = 2;
 	if(CheckActiveItem(pId))
 		Index = 0;
@@ -1181,11 +1288,10 @@ int CUi::DoButton_Menu(CUIElement &UIElement, const CButtonContainer *pId, const
 	}
 	ColorRGBA ColorText(TextRender()->DefaultTextColor());
 	ColorRGBA ColorTextOutline(TextRender()->DefaultTextOutlineColor());
-	if(UIElement.Rect(0)->m_UITextContainer.Valid())
-		TextRender()->RenderTextContainer(UIElement.Rect(0)->m_UITextContainer, ColorText, ColorTextOutline);
+	if(UIElement.Rect(Index)->m_UITextContainer.Valid())
+		TextRender()->RenderTextContainer(UIElement.Rect(Index)->m_UITextContainer, ColorText, ColorTextOutline);
 	return DoButtonLogic(pId, Props.m_Checked, pRect, Props.m_Flags);
 }
-
 void CUi::DrawButton_FontIcon(const char *pText, const CUIRect *pRect, ColorRGBA Color, int Corners, bool Enabled) const
 {
 	pRect->Draw(Color, Corners, 5.0f);

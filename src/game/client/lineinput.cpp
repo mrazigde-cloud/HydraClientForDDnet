@@ -7,7 +7,7 @@
 #include <base/dbg.h>
 #include <base/mem.h>
 #include <base/str.h>
-
+#include <base/time.h>
 #include <engine/graphics.h>
 #include <engine/keys.h>
 #include <engine/shared/config.h>
@@ -193,6 +193,8 @@ bool CLineInput::ProcessInput(const IInput::CEvent &Event)
 	// update derived attributes to handle external changes to the buffer
 	UpdateStrData();
 
+	static int64_t s_LastFallbackTime = 0;
+
 	const size_t OldCursorPos = m_CursorPos;
 	const bool Selecting = Input()->ShiftIsPressed();
 	const size_t SelectionLength = GetSelectionLength();
@@ -200,7 +202,11 @@ bool CLineInput::ProcessInput(const IInput::CEvent &Event)
 
 	if(Event.m_Flags & IInput::FLAG_TEXT)
 	{
-		SetRange(Event.m_aText, m_SelectionStart, m_SelectionEnd);
+		// Suppress if we just inserted the same keystroke via the KEY_PRESS
+		// fallback (platforms that emit PRESS and TEXT as separate events
+		// would otherwise insert the character twice).
+		if(time_get() - s_LastFallbackTime > time_freq() / 50) // ~20ms
+			SetRange(Event.m_aText, m_SelectionStart, m_SelectionEnd);
 		KeyHandled = true;
 	}
 
@@ -402,6 +408,47 @@ bool CLineInput::ProcessInput(const IInput::CEvent &Event)
 			m_SelectionEnd = m_CursorPos = m_Len;
 			KeyHandled = true;
 		}
+		else if(!ModPressed && !AltPressed && !(Event.m_Flags & IInput::FLAG_TEXT))
+		{
+			// Fallback for platforms / IMEs that don't reliably generate FLAG_TEXT.
+			// When a printable key was pressed but no text event was attached,
+			// insert the corresponding ASCII character ourselves, so typing works
+			// without spamming keys.
+			char Ch = 0;
+			const bool Shift = Input()->ShiftIsPressed();
+			if(Event.m_Key >= KEY_A && Event.m_Key <= KEY_Z)
+				Ch = (char)((Shift ? 'A' : 'a') + (Event.m_Key - KEY_A));
+			else if(Event.m_Key >= KEY_0 && Event.m_Key <= KEY_9)
+			{
+				if(!Shift)
+					Ch = (char)('0' + (Event.m_Key - KEY_0));
+				else
+				{
+					static const char s_aShiftDigits[10] = {')', '!', '@', '#', '$', '%', '^', '&', '*', '('};
+					Ch = s_aShiftDigits[Event.m_Key - KEY_0];
+				}
+			}
+			else if(Event.m_Key == KEY_SPACE) Ch = ' ';
+			else if(Event.m_Key == KEY_MINUS) Ch = Shift ? '_' : '-';
+			else if(Event.m_Key == KEY_EQUALS) Ch = Shift ? '+' : '=';
+			else if(Event.m_Key == KEY_LEFTBRACKET) Ch = Shift ? '{' : '[';
+			else if(Event.m_Key == KEY_RIGHTBRACKET) Ch = Shift ? '}' : ']';
+			else if(Event.m_Key == KEY_BACKSLASH) Ch = Shift ? '|' : '\\';
+			else if(Event.m_Key == KEY_SEMICOLON) Ch = Shift ? ':' : ';';
+			else if(Event.m_Key == KEY_APOSTROPHE) Ch = Shift ? '"' : '\'';
+			else if(Event.m_Key == KEY_COMMA) Ch = Shift ? '<' : ',';
+			else if(Event.m_Key == KEY_PERIOD) Ch = Shift ? '>' : '.';
+			else if(Event.m_Key == KEY_SLASH) Ch = Shift ? '?' : '/';
+			else if(Event.m_Key == KEY_GRAVE) Ch = Shift ? '~' : '`';
+
+			if(Ch != 0)
+			{
+				s_LastFallbackTime = time_get();
+				char aBuf[2] = {Ch, 0};
+				SetRange(aBuf, m_SelectionStart, m_SelectionEnd);
+				KeyHandled = true;
+			}
+		}
 	}
 
 	m_WasCursorChanged |= OldCursorPos != m_CursorPos;
@@ -547,22 +594,14 @@ STextBoundingBox CLineInput::Render(const CUIRect *pRect, float FontSize, int Al
 
 void CLineInput::RenderCandidates()
 {
-	// Check if the active line input was not rendered and deactivate it in that case.
-	// This can happen e.g. when an input in the ingame menu is active and the menu is
-	// closed or when switching between menu and editor with an active input.
+	// Only reset the "rendered" flag. Do not deactivate the input here:
+	// rendering a frame without the input (e.g. because the chat was not
+	// rendered yet) must not silently disable keyboard text input.
+	// Explicit deactivation is the responsibility of whoever opened the input
+	// (chat closes → CChat::DisableMode, menu closes → CMenus::SetActive).
 	CLineInput *pActiveInput = GetActiveInput();
 	if(pActiveInput != nullptr)
-	{
-		if(pActiveInput->m_WasRendered)
-		{
-			pActiveInput->m_WasRendered = false;
-		}
-		else
-		{
-			pActiveInput->Deactivate();
-			return;
-		}
-	}
+		pActiveInput->m_WasRendered = false;
 
 	if(!Input()->HasComposition() || !Input()->GetCandidateCount())
 		return;

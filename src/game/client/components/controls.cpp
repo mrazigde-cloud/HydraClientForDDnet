@@ -41,22 +41,50 @@ static bool ShouldRotateInputForConn(int Conn)
 // Replace the aim direction of the input with an independent spin angle.
 // The crosshair (MousePos) is ignored for the angle, but its length is
 // preserved so the server-side physics sees a valid magnitude.
-// When fire or hook is pressed, the input is left untouched so the shot
-// lands exactly under the crosshair.
-static void ApplySpin(CNetObj_PlayerInput *pInput, const CNetObj_PlayerInput *pLastInput, int Slot, const vec2 &MousePos, float SpinAngle)
+//
+// While fire/hook is held:
+//   - hammer and gun: instant snap to the crosshair (1-tick), then the
+//     spin resumes on subsequent held ticks (pre-existing behaviour).
+//   - any other weapon: smoothly rotate the aim toward the crosshair at a
+//     constant angular speed, until fire/hook is released.
+void CControls::ApplySpin(CNetObj_PlayerInput *pInput, const CNetObj_PlayerInput *pLastInput, int Slot, const vec2 &MousePos, float SpinAngle)
 {
 	if(!ShouldRotateInputForConn(Slot))
 		return;
 
-	// Edge detection: only skip spin on the tick when fire/hook is FIRST
-	// pressed. A single shot / hook goes straight to the crosshair, then
-	// the tee spins freely again, even while the button is still held
-	// (so e.g. held laser or held hook no longer locks the aim direction).
-	const bool FireJustPressed = (pInput->m_Fire & 1) != 0 && (pLastInput->m_Fire & 1) == 0;
-	const bool HookJustPressed = pInput->m_Hook != 0 && pLastInput->m_Hook == 0;
-	if(FireJustPressed || HookJustPressed)
+	const int Weapon = GameClient()->m_Snap.m_pLocalCharacter
+		? GameClient()->m_Snap.m_pLocalCharacter->m_Weapon
+		: WEAPON_HAMMER;
+
+	const bool Jetpack =
+		GameClient()->m_Snap.m_LocalClientId >= 0 &&
+		GameClient()->m_aClients[GameClient()->m_Snap.m_LocalClientId].m_Jetpack;
+
+	const bool FireHeld = (pInput->m_Fire & 1) != 0;
+	const bool HookHeld = pInput->m_Hook != 0;
+	const bool Held = FireHeld || HookHeld;
+
+	// Whether the aim keeps spinning while fire/hook is held.
+	//   In jetpack:        only ninja and the hook keep spinning; every other
+	//                      fire action locks the aim to the cursor.
+	//   Without jetpack:   hammer / gun / ninja spin, other weapons lock to cursor.
+	const bool SpinWhileHeld = Jetpack
+		? (Weapon == WEAPON_NINJA || HookHeld)
+		: (Weapon == WEAPON_HAMMER || Weapon == WEAPON_GUN || Weapon == WEAPON_NINJA);
+
+	const bool FireJustPressed = FireHeld && (pLastInput->m_Fire & 1) == 0;
+	const bool HookJustPressed = HookHeld && pLastInput->m_Hook == 0;
+	const bool JustPressed = FireJustPressed || HookJustPressed;
+
+	// First tick of press: always snap to the cursor (single shot / hook).
+	if(JustPressed)
 		return;
 
+	// Hold with a weapon that should not spin -> stay on cursor.
+	if(Held && !SpinWhileHeld)
+		return;
+
+	// Otherwise spin.
 	const float Len = std::max(length(MousePos), 1.0f);
 	pInput->m_TargetX = round_to_int(cosf(SpinAngle) * Len);
 	pInput->m_TargetY = round_to_int(sinf(SpinAngle) * Len);

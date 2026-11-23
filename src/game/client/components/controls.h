@@ -62,6 +62,7 @@ public:
 	void SetSlotFireReleased(int Slot, int Fire);
 
 private:
+	void ApplySpin(CNetObj_PlayerInput *pInput, const CNetObj_PlayerInput *pLastInput, int Slot, const vec2 &MousePos, float SpinAngle);
 	static void ConKeyInputState(IConsole::IResult *pResult, void *pUserData);
 	static void ConKeyInputCounter(IConsole::IResult *pResult, void *pUserData);
 	static void ConKeyInputSet(IConsole::IResult *pResult, void *pUserData);

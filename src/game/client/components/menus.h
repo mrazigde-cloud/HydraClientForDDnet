@@ -55,17 +55,26 @@ public:
 	int DoButton_CheckBox(const void *pId, const char *pText, int Checked, const CUIRect *pRect);
 	int DoButton_CheckBoxAutoVMarginAndSet(const void *pId, const char *pText, int *pValue, CUIRect *pRect, float VMargin);
 	int DoButton_CheckBox_Number(const void *pId, const char *pText, int Checked, const CUIRect *pRect);
-
+	bool m_HideStartMenuLogo = false;
+	IGraphics::CTextureHandle m_HydraLogoTexture;
+	bool m_HydraLogoLoaded = false;
+	float m_HydraLogoAspect = 360.0f / 103.0f;
 	bool DoLine_RadioMenu(CUIRect &View, const char *pLabel, std::vector<CButtonContainer> &vButtonContainers, const std::vector<const char *> &vLabels, const std::vector<int> &vValues, int &Value);
 
 private:
+	void PreloadAssetsTextures();
+	bool m_SkinsPreloaded = false;
+	bool m_AssetsPreloaded = false;
+	int m_LastSkinCount = -1;
+	int m_SkinCountStableFrames = 0;
+	void PreloadSettingsTextures();
 	CUi::SColorPickerPopupContext m_ColorPickerPopupContext;
 	ColorHSLA DoLine_ColorPicker(CButtonContainer *pResetId, float LineSize, float LabelSize, float BottomMargin, CUIRect *pMainRect, const char *pText, unsigned int *pColorValue, ColorRGBA DefaultColor, bool CheckBoxSpacing = true, int *pCheckBoxValue = nullptr, bool Alpha = false);
 	ColorHSLA DoButton_ColorPicker(const CUIRect *pRect, unsigned int *pHslaColor, bool Alpha);
 	void DoForceSkinPicker(CUIRect View);
 	int DoButton_GridHeader(const void *pId, const char *pText, int Checked, const CUIRect *pRect, int Align = TEXTALIGN_ML);
 	int DoButton_Favorite(const void *pButtonId, const void *pParentId, bool Checked, const CUIRect *pRect);
-
+	void DrawMenuButtonOutline(const CUIRect *pRect, float Rounding);
 	std::optional<std::chrono::nanoseconds> m_SkinList7LastRefreshTime;
 	std::optional<std::chrono::nanoseconds> m_SkinPartsList7LastRefreshTime;
 
@@ -121,6 +130,16 @@ protected:
 
 	bool m_IsInit = false;
 
+	struct SStartMenuIntro
+	{
+		bool m_Active = false;
+		bool m_Played = false;
+		int64_t m_StartTime = 0;
+	};
+	SStartMenuIntro m_StartMenuIntro;
+
+	void RenderStartMenuIntro(CUIRect Screen, float T);
+	void RandomizeNickAndSkins();
 	static void LoadEntities(struct SCustomEntities *pEntitiesItem, void *pUser);
 	static int EntitiesScan(const char *pName, int IsDir, int DirType, void *pUser);
 
@@ -169,6 +188,7 @@ protected:
 	bool m_MenuActive;
 
 	bool m_DummyNamePlatePreview = false;
+	int m_NotificationSelected = -1;
 
 	class CJoinTutorial
 	{
@@ -605,6 +625,29 @@ protected:
 	// found in menus_settings_ddnet.cpp
 	void RenderSettingsDDNet(CUIRect MainView);
 	void RenderSettingsTestClient(CUIRect MainView);
+
+	// Profiles (menus_settings.cpp)
+	struct SProfile
+	{
+		char m_aName[24];
+		char m_aPlayerName[16];
+		char m_aClan[12];
+		char m_aSkin[24];
+		int m_UseCustomColor;
+		unsigned int m_ColorBody;
+		unsigned int m_ColorFeet;
+	};
+	std::vector<SProfile> m_vProfiles;
+	int m_ProfileSelected = -1;
+	bool m_ProfilesLoaded = false;
+	bool m_ProfilesDirty = false;
+	int64_t m_ProfilesLastChange = 0;
+	void RenderSettingsProfiles(CUIRect MainView);
+	bool DoProfileSkinPicker(CUIRect View, SProfile &Profile);
+	void ProfilesLoad();
+	void ProfilesSave();
+	void ProfileFromCurrent(SProfile &Profile);
+	void ProfileApply(const SProfile &Profile);
 	void RenderSettingsAnimations(CUIRect MainView);
 	void RenderSettingsTabContent(int Page, CUIRect View);
 	void SetMenuBackgroundForPage(int Page);
@@ -696,7 +739,9 @@ protected:
 	void UpdateColors();
 
 	IGraphics::CTextureHandle m_TextureBlob;
-
+	IGraphics::CTextureHandle m_LogoTexture;
+	int m_LogoWidth = 0;
+	int m_LogoHeight = 0;
 public:
 	void RenderBackground();
 
@@ -758,6 +803,7 @@ public:
 		SETTINGS_DDNET,
 		SETTINGS_ASSETS,
 		SETTINGS_TESTCLIENT,
+		SETTINGS_PROFILES,
 		SETTINGS_ANIMATIONS,
 		SETTINGS_CREDITS,
 		SETTINGS_LENGTH,
@@ -873,6 +919,7 @@ public:
 		POPUP_RESTART,
 		POPUP_WARNING,
 		POPUP_SAVE_SKIN,
+		POPUP_NOTIFICATIONS,
 	};
 
 	enum
@@ -885,12 +932,15 @@ public:
 	void SetMenuPage(int NewPage);
 	void RefreshBrowserTab(bool Force);
 	void ForceRefreshLanPage();
+	void SetGamePage(int Page) { m_GamePage = Page; }
 	void SetShowStart(bool ShowStart);
 	void ShowQuitPopup();
+	void OpenNotifications();
 	void JoinTutorial();
 	void Connect(const char *pAddress);
 
 private:
+	std::chrono::nanoseconds m_LastNickSkinRandomize{};
 	CCommunityIcons m_CommunityIcons;
 	CMenusIngameTouchControls m_MenusIngameTouchControls;
 	friend CMenusIngameTouchControls;

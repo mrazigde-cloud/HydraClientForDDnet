@@ -384,6 +384,8 @@ public:
 	 */
 	class CTouchState
 	{
+		vec2 m_ScrollVelocity = vec2(0.0f, 0.0f);
+		vec2 m_ScrollMomentum = vec2(0.0f, 0.0f);
 		friend class CUi;
 
 		bool m_SecondaryPressedNext = false;
@@ -391,6 +393,7 @@ public:
 		vec2 m_SecondaryActivationDelta = vec2(0.0f, 0.0f);
 
 	public:
+		bool m_MomentumJustStarted = false;
 		bool m_AnyPressed = false;
 		bool m_PrimaryPressed = false;
 		bool m_SecondaryPressed = false;
@@ -407,6 +410,7 @@ private:
 	const void *m_pLastActiveItem = nullptr; // only used internally to track active CLineInput
 	const void *m_pBecomingHotItem = nullptr;
 	CScrollRegion *m_pHotScrollRegion = nullptr;
+	CScrollRegion *m_pLastScrollRegionForMomentum = nullptr;
 	CScrollRegion *m_pBecomingHotScrollRegion = nullptr;
 	bool m_ActiveItemValid = false;
 
@@ -435,7 +439,6 @@ private:
 		const void *m_pLastTextId = nullptr;
 	};
 	CValueSelectorState m_ActiveValueSelectorState;
-
 	vec2 m_UpdatedMousePos = vec2(0.0f, 0.0f); // in window screen space
 	vec2 m_UpdatedMouseDelta = vec2(0.0f, 0.0f); // in window screen space
 	vec2 m_MousePos = vec2(0.0f, 0.0f); // in gui space
@@ -443,7 +446,13 @@ private:
 	unsigned m_UpdatedMouseButtons = 0;
 	unsigned m_MouseButtons = 0;
 	unsigned m_LastMouseButtons = 0;
+	vec2 m_MouseDragScrollStart = vec2(0.0f, 0.0f);
+	bool m_MouseDragScrollMoved = false;
+	vec2 m_MouseDragVelocity = vec2(0.0f, 0.0f);
+	vec2 m_MouseDragMomentum = vec2(0.0f, 0.0f);
+	CScrollRegion *m_pMouseDragRegion = nullptr;
 	CTouchState m_TouchState;
+	CScrollRegion *m_pScrollMomentumRegion = nullptr;
 	bool m_MouseSlow = false;
 	bool m_MouseLock = false;
 	const void *m_pMouseLockId = nullptr;
