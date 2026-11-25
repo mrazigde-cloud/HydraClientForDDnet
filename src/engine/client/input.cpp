@@ -767,10 +767,12 @@ int CInput::Update()
 #endif
 
 		case SDL_TEXTINPUT:
+		{
 			m_CompositionString = "";
 			m_CompositionCursor = 0;
 			AddTextEvent(Event.text.text);
 			break;
+		}
 
 		// handle keys
 		case SDL_KEYDOWN:

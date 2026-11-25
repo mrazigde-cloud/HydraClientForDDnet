@@ -135,7 +135,8 @@ class CClient : public IClient, public CDemoPlayer::IListener
 	std::vector<std::string> m_vMaplistEntries;
 
 	// version-checking
-	char m_aVersionStr[10] = "0";
+	char m_aVersionStr[64] = "0";
+	std::shared_ptr<IHttpRequest> m_pHydraReleaseTask = nullptr;
 
 	// pinging
 	int64_t m_PingStartTime = 0;
@@ -354,7 +355,8 @@ public:
 	int *GetInputForConn(int Conn, int Tick) const override;
 
 	const char *LatestVersion() const override;
-
+	void RequestHydraRelease();
+	void UpdateHydraRelease();
 	// ------ state handling -----
 	void SetState(EClientState State);
 

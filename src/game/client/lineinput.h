@@ -70,7 +70,9 @@ private:
 	vec2 m_CaretPosition;
 	SMouseSelection m_MouseSelection;
 	size_t m_LastCompositionCursorPos;
-
+	int64_t m_LastTextEventTime = 0;
+	int m_PendingFallbackKey = 0;
+	char m_PendingFallbackChar = 0;
 	bool m_Hidden;
 	std::string m_StarsBuffer;
 	const char *m_pEmptyText;

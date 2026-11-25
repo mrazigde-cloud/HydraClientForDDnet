@@ -33,7 +33,7 @@ MACRO_CONFIG_INT(ClTouchControls, cl_touch_controls, 1, 0, 1, CFGFLAG_CLIENT | C
 #else
 MACRO_CONFIG_INT(ClTouchControls, cl_touch_controls, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Enable ingame touch controls")
 #endif
-MACRO_CONFIG_INT(ClTouchScrollSmooth, cl_touch_scroll_smooth, 2, 0, 2, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Smooth touch scrolling with inertia")
+MACRO_CONFIG_INT(ClTouchScrollSmooth, cl_touch_scroll_smooth, 0, 0, 2, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Smooth touch scrolling with inertia")
 MACRO_CONFIG_INT(ClWheelScrollAmount, cl_wheel_scroll_amount, 60, 10, 500, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Pixels to scroll per mouse wheel notch")
 MACRO_CONFIG_INT(ClScrollInertiaStrength, cl_scroll_inertia_strength, 100, 10, 300, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Scroll inertia strength (100 = default)")
 MACRO_CONFIG_INT(ClScrollInertiaDecay, cl_scroll_inertia_decay, 100, 10, 300, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Scroll inertia decay speed (100 = default, higher = stops faster)")
@@ -185,6 +185,7 @@ MACRO_CONFIG_INT(ClShowFreezeBars, cl_show_freeze_bars, 1, 0, 1, CFGFLAG_SAVE | 
 MACRO_CONFIG_INT(ClFreezeBarsAlphaInsideFreeze, cl_freezebars_alpha_inside_freeze, 0, 0, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Opacity of freeze bars inside freeze (0 invisible, 100 fully visible)")
 MACRO_CONFIG_INT(ClShowRecord, cl_showrecord, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Show old style DDRace client records")
 MACRO_CONFIG_INT(ClShowNotifications, cl_shownotifications, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Make the client notify when someone highlights you")
+MACRO_CONFIG_INT(ClNotificationDuration, cl_notification_duration, 6, 1, 60, CFGFLAG_CLIENT | CFGFLAG_SAVE, "How long notifications stay on screen in seconds")
 MACRO_CONFIG_INT(ClShowEmotes, cl_showemotes, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Show tee emotes")
 MACRO_CONFIG_INT(ClShowChat, cl_showchat, 1, 0, 2, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Show chat (2 to always show large chat area)")
 MACRO_CONFIG_INT(ClShowChatFriends, cl_show_chat_friends, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Show only chat messages from friends")
@@ -784,6 +785,7 @@ MACRO_CONFIG_COL(ClButtonOutlineColor1, cl_button_outline_color1, 0x00FF00FF, CF
 MACRO_CONFIG_COL(ClButtonOutlineColor2, cl_button_outline_color2, 0x00FFFFFF, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Second gradient color of the button outline");
 MACRO_CONFIG_INT(ClButtonOutlineMode, cl_button_outline_mode, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Button outline: 0=constant, 1=linear shimmer");
 MACRO_CONFIG_INT(ClButtonOutlineSpeed, cl_button_outline_speed, 50, 1, 500, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Button outline shimmer speed in percent");
+MACRO_CONFIG_INT(ClButtonOutlineAnimate, cl_button_outline_animate, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Animate the button outline")
 MACRO_CONFIG_COL(ClLaserRifleInnerColor, cl_laser_rifle_inner_color, 11206591, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Laser inner color for Rifle")
 MACRO_CONFIG_COL(ClLaserRifleOutlineColor, cl_laser_rifle_outline_color, 11176233, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Laser outline color for Rifle")
 MACRO_CONFIG_COL(ClLaserShotgunInnerColor, cl_laser_sg_inner_color, 1467241, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Laser inner color for Shotgun")

@@ -217,7 +217,7 @@ void CMenusStart::RenderStartMenu(CUIRect MainView)
 
 	// Колокольчик уведомлений (слева от кнопки консоли)
 	CUIRect BellButton = ConsoleButton;
-	BellButton.x -= ConsoleButton.w + 5.0f;
+	BellButton.x -= ConsoleButton.w + 15.0f;
 	static CButtonContainer s_BellButton;
 	if(GameClient()->m_Menus.DoButton_Menu(&s_BellButton, FontIcon::NEWSPAPER, 0, &BellButton, BUTTONFLAG_LEFT, nullptr, IGraphics::CORNER_ALL, 5.0f, 0.0f, ColorRGBA(0.0f, 0.0f, 0.0f, 0.1f), nullptr, &s_aAnimators[ANIM_BELL]))
 	{
@@ -277,7 +277,7 @@ void CMenusStart::RenderStartMenu(CUIRect MainView)
 
 	if(State == IUpdater::CLEAN && NeedUpdate)
 	{
-		str_format(aBuf, sizeof(aBuf), Localize("DDNet %s is out!"), Client()->LatestVersion());
+		str_format(aBuf, sizeof(aBuf), Localize("HydraClient %s is out!"), Client()->LatestVersion());
 		TextRender()->TextColor(1.0f, 0.4f, 0.4f, 1.0f);
 	}
 	else if(State == IUpdater::CLEAN)
@@ -312,11 +312,11 @@ void CMenusStart::RenderStartMenu(CUIRect MainView)
 		static CButtonContainer s_DownloadButton;
 		if(GameClient()->m_Menus.DoButton_Menu(&s_DownloadButton, Localize("Download"), 0, &DownloadButton, BUTTONFLAG_LEFT, nullptr, IGraphics::CORNER_ALL, 5.0f, 0.0f, ColorRGBA(0.0f, 0.0f, 0.0f, 0.25f), nullptr, &s_aAnimators[ANIM_UPDATE]))
 		{
-			Client()->ViewLink("https://ddnet.org/downloads/");
+			Client()->ViewLink("https://github.com/mrazigde-cloud/HydraClientForDDnet/releases");
 		}
 
 		char aBuf[64];
-		str_format(aBuf, sizeof(aBuf), Localize("DDNet %s is out!"), Client()->LatestVersion());
+		str_format(aBuf, sizeof(aBuf), Localize("HydraClient %s is out!"), Client()->LatestVersion());
 		SLabelProperties UpdateLabelProps;
 		UpdateLabelProps.SetColor(ColorRGBA(1.0f, 0.4f, 0.4f, 1.0f));
 		Ui()->DoLabel(&VersionUpdate, aBuf, 14.0f, TEXTALIGN_ML, UpdateLabelProps);

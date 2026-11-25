@@ -2723,3 +2723,267 @@ not bound
 
 Show cursor
 == 
+
+Hydra Client
+== Hydra клиент
+
+Name Gradient
+== Градиент имени
+
+Tee Rotation
+== Вращение ти
+
+Direction Rotation
+== Вращение прицела
+
+Force Skin
+== Принудительный скин
+
+Me (main, dummy, extra)
+== Я (основной, дамми, доп.)
+
+Wave over the whole name
+== Волна по всему имени
+
+Color 1
+== Цвет 1
+
+Color 2
+== Цвет 2
+
+Color 3
+== Цвет 3
+
+Enable trails
+== Включить следы
+
+Colors per group
+== Цвета по группам
+
+Dashes
+== Штрихи
+
+Ribbon
+== Лента
+
+Neon
+== Неон
+
+Dash size
+== Размер штриха
+
+Use sprite
+== Использовать спрайт
+
+Selected sprite
+== Выбранный спрайт
+
+Cycle from folder
+== Цикл из папки
+
+Selected
+== Выбран
+
+Available sprites:
+== Доступные спрайты:
+
+No PNG files found in trail/
+== В папке trail/ нет PNG-файлов
+
+Sprite size (%)
+== Размер спрайта (%)
+
+Rotate along direction
+== Поворачивать по направлению
+
+Swing rotation
+== Качающееся вращение
+
+Swing angle (°)
+== Угол качания (°)
+
+Swing speed (%)
+== Скорость качания (%)
+
+Ribbon width
+== Ширина ленты
+
+Spacing
+== Интервал
+
+Lifetime (ms)
+== Время жизни (мс)
+
+Fade (ms, 0=off)
+== Затухание (мс, 0=выкл)
+
+Bounce
+== Пружина
+
+Ease-Out
+== Плавное
+
+Narrow (ms)
+== Сужение (мс)
+
+Enable weather effects
+== Включить погодные эффекты
+
+Snowflakes count
+== Количество снежинок
+
+Snow speed
+== Скорость снега
+
+Snowflake size
+== Размер снежинок
+
+Snow opacity
+== Прозрачность снега
+
+Chance of landing on tiles
+== Шанс приземления на тайлы
+
+Snowflake color
+== Цвет снежинок
+
+Enable tee rotation
+== Включить вращение ти
+
+Swing angle
+== Угол качания
+
+Own tee (main)
+== Свой ти (основной)
+
+Dummy tee
+== Ти-дамми
+
+Extra tees
+== Доп. ти
+
+Other players
+== Другие игроки
+
+Enable direction rotation
+== Включить вращение прицела
+
+Step angle
+== Угол шага
+
+Own direction (main)
+== Свой прицел (основной)
+
+Dummy direction
+== Прицел дамми
+
+Extra directions
+== Доп. прицелы
+
+My Skin
+== Мой скин
+
+Skin name:
+== Имя скина:
+
+Use my current skin
+== Взять мой скин
+
+Random seed
+== Случайное зерно
+
+0 = stable base distribution (click Reroll to shuffle)
+== 0 = стабильное распределение (нажмите Перемешать)
+
+Reroll (new random skins)
+== Перемешать (новые скины)
+
+Each player gets a different skin based on their ID + seed.
+== Каждый игрок получает свой скин на основе ID + зерна.
+
+Do not affect my own tee
+== Не применять к моему ти
+
+Skin's own color
+== Свой цвет скина
+
+My colors
+== Мои цвета
+
+Color is applied per-part (body / feet) for all forced skins
+== Цвет применяется по частям (тело / ноги) для всех принудительных скинов
+
+Set your body/feet colors in the Tee tab first!
+== Сначала задайте цвета тела/ног во вкладке «Ти»!
+
+Color seed
+== Зерно цвета
+
+Reroll colors
+== Перемешать цвета
+
+0 = stable base palette, other = shuffled palette
+== 0 = стабильная палитра, другое = перемешанная
+
+Auto switch to Dummy/Extra on connect
+== Автопереключение на дамми/доп. при подключении
+
+Automatically switch camera to Dummy or Extra connections when they join
+== Автоматически переключать камеру на дамми или доп. подключения при их входе
+
+Randomize nick + skins continuously
+== Постоянно рандомизировать ник + скины
+
+While online, periodically change nick (from other players) and skins
+== В сети периодически менять ник (на чужой) и скины
+
+Randomize interval
+== Интервал рандомизации
+
+Scroll inertia
+== Инерция прокрутки
+
+Scroll stop speed
+== Скорость остановки прокрутки
+
+Scroll flight speed
+== Скорость разгона прокрутки
+
+Min flick speed
+== Мин. скорость рывка
+
+Drag threshold
+== Порог перетаскивания
+
+Notification duration
+== Длительность уведомлений
+
+How long popup notifications stay on screen (seconds)
+== Сколько секунд показывать всплывающие уведомления
+
+Reset Hydra settings to defaults
+== Сбросить настройки Hydra
+
+Reset Hydra settings
+== Сброс настроек Hydra
+
+Are you sure you want to reset all Hydra settings to defaults? This cannot be undone.
+== Вы уверены, что хотите сбросить все настройки Hydra по умолчанию? Это нельзя отменить.
+
+Search skins...
+== Поиск скинов...
+
+Search:
+== Поиск:
+
+No matching skins
+== Нет подходящих скинов
+
+Make the client notify when someone highlights you
+== Уведомлять, когда вас выделяют в чате
+
+How long notifications stay on screen in seconds
+== Сколько секунд показывать уведомления
+
+Smooth touch scrolling with inertia
+== Плавная прокрутка касанием с инерцией

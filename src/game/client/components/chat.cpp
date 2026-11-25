@@ -288,13 +288,6 @@ bool CChat::OnInput(const IInput::CEvent &Event)
     // it here every time we receive an event.
     if(!m_Input.IsActive())
         m_Input.Activate(EInputPriority::CHAT);
-
-	dbg_msg("chat-debug", "mode=%d key=%d flags=0x%x text=\"%s\" activeInput=%p thisInput=%p keybinder=%d consoleActive=%d",
-		(int)m_Mode, Event.m_Key, Event.m_Flags, Event.m_aText,
-		(void *)CLineInput::GetActiveInput(), (void *)&m_Input,
-		(int)GameClient()->m_KeyBinder.IsActive(),
-		(int)GameClient()->m_GameConsole.IsActive());
-
 	if(Event.m_Flags & IInput::FLAG_PRESS && Event.m_Key == KEY_ESCAPE)
 	{
 		DisableMode();

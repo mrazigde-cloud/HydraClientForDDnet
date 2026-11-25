@@ -70,7 +70,7 @@ void CMenus::RenderServerbrowserServerList(CUIRect View, bool &WasListboxItemAct
 	View.HSplitTop(ms_ListheaderHeight, &Headers, &View);
 	Headers.Draw(ColorRGBA(1.0f, 1.0f, 1.0f, 0.25f), IGraphics::CORNER_T, 5.0f);
 	Headers.VSplitRight(s_ListBox.ScrollbarWidthMax(), &Headers, nullptr);
-	View.Draw(ColorRGBA(0.0f, 0.0f, 0.0f, 0.15f), IGraphics::CORNER_NONE, 0.0f);
+	View.Draw(ColorRGBA(0.0f, 0.0f, 0.0f, 0.15f), IGraphics::CORNER_B, 6.0f);
 
 	struct SColumn
 	{
@@ -120,14 +120,14 @@ void CMenus::RenderServerbrowserServerList(CUIRect View, bool &WasListboxItemAct
 		{-1, -1, "", -1, 2.0f, {0}},
 		{COL_FLAG_LOCK, -1, "", -1, 14.0f, {0}},
 		{COL_FLAG_FAV, IServerBrowser::SORT_FAVORITES, "", -1, ClickableIconSpace, {0}},
-		{COL_COMMUNITY, -1, "", -1, 28.0f, {0}},
+		{COL_COMMUNITY, -1, "", -1, 58.0f, {0}},
 		{COL_NAME, IServerBrowser::SORT_NAME, Localizable("Name"), 0, 50.0f, {0}},
-		{COL_GAMETYPE, IServerBrowser::SORT_GAMETYPE, Localizable("Type"), 1, 50.0f, {0}},
+		{COL_GAMETYPE, IServerBrowser::SORT_GAMETYPE, Localizable("Type"), 1, 64.0f, {0}},
 		{COL_MAP, IServerBrowser::SORT_MAP, Localizable("Map"), 1, 120.0f + (Headers.w - 480) / 8, {0}},
 		{COL_FRIENDS, IServerBrowser::SORT_NUMFRIENDS, "", 1, ClickableIconSpace, {0}},
-		{COL_PLAYERS, IServerBrowser::SORT_NUMPLAYERS, Localizable("Players"), 1, 60.0f, {0}},
+		{COL_PLAYERS, IServerBrowser::SORT_NUMPLAYERS, Localizable("Players"), 1, 70.0f, {0}},
 		{-1, -1, "", 1, 4.0f, {0}},
-		{COL_PING, IServerBrowser::SORT_PING, Localizable("Ping"), 1, 40.0f, {0}},
+		{COL_PING, IServerBrowser::SORT_PING, Localizable("Ping"), 1, 48.0f, {0}},
 	};
 
 	const int NumCols = std::size(s_aCols);
@@ -261,7 +261,8 @@ void CMenus::RenderServerbrowserServerList(CUIRect View, bool &WasListboxItemAct
 	}
 
 	s_ListBox.SetActive(!Ui()->IsPopupOpen());
-	s_ListBox.DoStart(ms_ListheaderHeight + 3.0f, NumServers, 1, 3, -1, &View, false);
+	s_ListBox.DoAutoSpacing(3.0f);
+	s_ListBox.DoStart(30.0f, NumServers, 1, 3, -1, &View, false);
 
 	if(m_ServerBrowserShouldRevealSelection)
 	{
@@ -315,7 +316,9 @@ void CMenus::RenderServerbrowserServerList(CUIRect View, bool &WasListboxItemAct
 			continue;
 		}
 
-		const float FontSize = 12.0f;
+		ListItem.m_Rect.Draw(ColorRGBA(1.0f, 1.0f, 1.0f, 0.05f), IGraphics::CORNER_ALL, 6.0f);
+
+		const float FontSize = 14.0f;
 		char aTemp[64];
 		for(const auto &Col : s_aCols)
 		{
@@ -517,7 +520,7 @@ void CMenus::RenderServerbrowserStatusBox(CUIRect StatusBox, bool WasListboxItem
 	SearchInfoAndAddr.HSplitTop(40.0f, &SearchAndInfo, &ServerAddr);
 	if(ServerAddr.h > 25.0f)
 		ServerAddr.h = 25.0f;
-	const float PlayersOnlineHeight = std::min(20.0f, StatusBox.h * 0.25f);
+	const float PlayersOnlineHeight = std::min(32.0f, StatusBox.h * 0.35f);
 	ServersAndConnect.HSplitTop(PlayersOnlineHeight, &ServersPlayersOnline, &ConnectButtons);
 	ConnectButtons.HSplitTop(5.0f, nullptr, &ConnectButtons);
 	if(ConnectButtons.h < 20.0f)
@@ -619,64 +622,14 @@ void CMenus::RenderServerbrowserStatusBox(CUIRect StatusBox, bool WasListboxItem
 
 	// buttons
 	{
-		constexpr float Gap = 5.0f;
-		constexpr float OutlineThickness = 2.0f;
-		constexpr int OutlineCorners = IGraphics::CORNER_ALL;
-		constexpr float OutlineRounding = 4.0f;
-		constexpr float ButtonRounding = 1.5f;
+		constexpr float Gap = 8.0f;
+		const float ButtonHeight = std::min(40.0f, ConnectButtons.h);
+		CUIRect Row, RefreshArea, ConnectArea;
+		ConnectButtons.HSplitTop(ButtonHeight, &Row, nullptr);
+		Row.VSplitLeft(Row.w * 0.35f, &RefreshArea, &ConnectArea);
+		ConnectArea.VSplitLeft(Gap, nullptr, &ConnectArea);
 
-		const float HalfWidth = (ConnectButtons.w - Gap) / 2.0f;
-		const float SquareSize = std::min(ConnectButtons.h * 1.6f, HalfWidth * 0.85f);
-		const float RefreshHeight = SquareSize * 0.75f;
-
-		CUIRect RefreshArea, ConnectArea;
-		ConnectButtons.VSplitMid(&RefreshArea, &ConnectArea, Gap);
-
-		const float ButtonY = ConnectButtons.y + (ConnectButtons.h - SquareSize) / 2.0f;
-
-		CUIRect ButtonRefresh{
-			RefreshArea.x + (RefreshArea.w - SquareSize) / 2.0f,
-			ButtonY + (SquareSize - RefreshHeight) / 2.0f,
-			SquareSize, RefreshHeight};
-		CUIRect ButtonConnect{
-			ConnectArea.x + (ConnectArea.w - SquareSize) / 2.0f,
-			ButtonY + (SquareSize - RefreshHeight) / 2.0f,
-			SquareSize, RefreshHeight};
-
-		static SUIAnimator s_RefreshAnimator;
-		s_RefreshAnimator.m_WOffset = 5.0f;
-		s_RefreshAnimator.m_HOffset = 5.0f;
-
-		static SUIAnimator s_ConnectAnimator;
-		s_ConnectAnimator.m_WOffset = 5.0f;
-		s_ConnectAnimator.m_HOffset = 5.0f;
-
-		// outline refresh
-		{
-			const float V = s_RefreshAnimator.m_Value;
-			const float Eased = V * V * (3.0f - 2.0f * V);
-			const float ExpandW = Eased * s_RefreshAnimator.m_WOffset;
-			const float ExpandH = Eased * s_RefreshAnimator.m_HOffset;
-			CUIRect Outline{
-				ButtonRefresh.x - OutlineThickness - ExpandW * 0.5f,
-				ButtonRefresh.y - OutlineThickness - ExpandH * 0.5f,
-				ButtonRefresh.w + (OutlineThickness + ExpandW * 0.5f) * 2.0f,
-				ButtonRefresh.h + (OutlineThickness + ExpandH * 0.5f) * 2.0f};
-			Outline.Draw(ColorRGBA(1.0f, 1.0f, 1.0f, 0.8f), OutlineCorners, OutlineRounding);
-		}
-		// outline connect
-		{
-			const float V = s_ConnectAnimator.m_Value;
-			const float Eased = V * V * (3.0f - 2.0f * V);
-			const float ExpandW = Eased * s_ConnectAnimator.m_WOffset;
-			const float ExpandH = Eased * s_ConnectAnimator.m_HOffset;
-			CUIRect Outline{
-				ButtonConnect.x - OutlineThickness - ExpandW * 0.5f,
-				ButtonConnect.y - OutlineThickness - ExpandH * 0.5f,
-				ButtonConnect.w + (OutlineThickness + ExpandW * 0.5f) * 2.0f,
-				ButtonConnect.h + (OutlineThickness + ExpandH * 0.5f) * 2.0f};
-			Outline.Draw(ColorRGBA(0.5f, 1.0f, 0.5f, 0.8f), OutlineCorners, OutlineRounding);
-		}
+		m_NoButtonOutline = true;
 
 		// refresh button
 		{
@@ -689,7 +642,7 @@ void CMenus::RenderServerbrowserStatusBox(CUIRect StatusBox, bool WasListboxItem
 			static CButtonContainer s_RefreshButton;
 			TextRender()->SetFontPreset(EFontPreset::ICON_FONT);
 			TextRender()->SetRenderFlags(ETextRenderFlags::TEXT_RENDER_FLAG_ONLY_ADVANCE_WIDTH | ETextRenderFlags::TEXT_RENDER_FLAG_NO_X_BEARING | ETextRenderFlags::TEXT_RENDER_FLAG_NO_Y_BEARING | ETextRenderFlags::TEXT_RENDER_FLAG_NO_PIXEL_ALIGNMENT | ETextRenderFlags::TEXT_RENDER_FLAG_NO_OVERSIZE);
-			const bool RefreshClicked = DoButton_Menu(&s_RefreshButton, aLabelBuf, 0, &ButtonRefresh, BUTTONFLAG_LEFT, nullptr, IGraphics::CORNER_ALL, ButtonRounding, 0.15f, ColorRGBA(0.1f, 0.1f, 0.1f, 0.9f), nullptr, &s_RefreshAnimator);
+			const bool RefreshClicked = DoButton_Menu(&s_RefreshButton, aLabelBuf, 0, &RefreshArea, BUTTONFLAG_LEFT, nullptr, IGraphics::CORNER_ALL, 8.0f, 0.2f, ColorRGBA(1.0f, 1.0f, 1.0f, 0.2f));
 			TextRender()->SetRenderFlags(0);
 			TextRender()->SetFontPreset(EFontPreset::DEFAULT_FONT);
 
@@ -702,17 +655,15 @@ void CMenus::RenderServerbrowserStatusBox(CUIRect StatusBox, bool WasListboxItem
 		// connect button
 		{
 			static CButtonContainer s_ConnectButton;
-			TextRender()->SetFontPreset(EFontPreset::ICON_FONT);
-			TextRender()->SetRenderFlags(ETextRenderFlags::TEXT_RENDER_FLAG_ONLY_ADVANCE_WIDTH | ETextRenderFlags::TEXT_RENDER_FLAG_NO_X_BEARING | ETextRenderFlags::TEXT_RENDER_FLAG_NO_Y_BEARING | ETextRenderFlags::TEXT_RENDER_FLAG_NO_PIXEL_ALIGNMENT | ETextRenderFlags::TEXT_RENDER_FLAG_NO_OVERSIZE);
-			const bool ConnectClicked = DoButton_Menu(&s_ConnectButton, FontIcon::RIGHT_TO_BRACKET, 0, &ButtonConnect, BUTTONFLAG_LEFT, nullptr, IGraphics::CORNER_ALL, ButtonRounding, 0.15f, ColorRGBA(0.1f, 0.3f, 0.1f, 0.9f), nullptr, &s_ConnectAnimator);
-			TextRender()->SetRenderFlags(0);
-			TextRender()->SetFontPreset(EFontPreset::DEFAULT_FONT);
+			const bool ConnectClicked = DoButton_Menu(&s_ConnectButton, Localize("Connect"), 0, &ConnectArea, BUTTONFLAG_LEFT, nullptr, IGraphics::CORNER_ALL, 8.0f, 0.2f, ColorRGBA(0.1f, 0.5f, 0.2f, 0.9f));
 
 			if(ConnectClicked || WasListboxItemActivated || (!Ui()->IsPopupOpen() && Ui()->ConsumeHotkey(CUi::HOTKEY_ENTER)))
 			{
 				Connect(g_Config.m_UiServerAddress);
 			}
 		}
+
+		m_NoButtonOutline = false;
 	}
 }
 
@@ -1484,7 +1435,7 @@ void CMenus::RenderServerbrowserFriends(CUIRect View)
 	const float SpacingH = 2.0f;
 
 	CUIRect List, ServerFriends;
-	View.HSplitBottom(70.0f, &List, &ServerFriends);
+	View.HSplitBottom(110.0f, &List, &ServerFriends);
 	List.HSplitTop(5.0f, nullptr, &List);
 	List.VSplitLeft(5.0f, nullptr, &List);
 
@@ -1748,7 +1699,7 @@ void CMenus::RenderServerbrowserFriends(CUIRect View)
 		CUIRect Button;
 		ServerFriends.Margin(5.0f, &ServerFriends);
 
-		ServerFriends.HSplitTop(18.0f, &Button, &ServerFriends);
+		ServerFriends.HSplitTop(26.0f, &Button, &ServerFriends);
 		str_format(aBuf, sizeof(aBuf), "%s:", Localize("Name"));
 		Ui()->DoLabel(&Button, aBuf, FontSize + 2.0f, TEXTALIGN_ML);
 		Button.VSplitLeft(80.0f, nullptr, &Button);
@@ -1756,7 +1707,7 @@ void CMenus::RenderServerbrowserFriends(CUIRect View)
 		Ui()->DoEditBox(&s_NameInput, &Button, FontSize + 2.0f);
 
 		ServerFriends.HSplitTop(3.0f, nullptr, &ServerFriends);
-		ServerFriends.HSplitTop(18.0f, &Button, &ServerFriends);
+		ServerFriends.HSplitTop(26.0f, &Button, &ServerFriends);
 		str_format(aBuf, sizeof(aBuf), "%s:", Localize("Clan"));
 		Ui()->DoLabel(&Button, aBuf, FontSize + 2.0f, TEXTALIGN_ML);
 		Button.VSplitLeft(80.0f, nullptr, &Button);
@@ -1764,7 +1715,7 @@ void CMenus::RenderServerbrowserFriends(CUIRect View)
 		Ui()->DoEditBox(&s_ClanInput, &Button, FontSize + 2.0f);
 
 		ServerFriends.HSplitTop(3.0f, nullptr, &ServerFriends);
-		ServerFriends.HSplitTop(18.0f, &Button, &ServerFriends);
+		ServerFriends.HSplitTop(30.0f, &Button, &ServerFriends);
 		static CButtonContainer s_AddButton;
 		if(DoButton_Menu(&s_AddButton, s_NameInput.IsEmpty() && !s_ClanInput.IsEmpty() ? Localize("Add clan") : Localize("Add friend"), 0, &Button))
 		{

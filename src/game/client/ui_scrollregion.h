@@ -23,15 +23,15 @@ struct CScrollRegionParams
 
 	CScrollRegionParams()
 	{
-		m_ScrollbarThickness = 20.0f;
-		m_ScrollbarMargin = 5.0f;
+		m_ScrollbarThickness = 32.0f;
+		m_ScrollbarMargin = 4.0f;
 		m_ScrollbarNoOuterMargin = false;
-		m_SliderMinSize = 25.0f;
+		m_SliderMinSize = 36.0f;
 		m_ScrollUnit = 10.0f;
 		m_ClipBgColor = ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f);
 		m_ScrollbarBgColor = ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f);
-		m_RailBgColor = ColorRGBA(1.0f, 1.0f, 1.0f, 0.25f);
-		m_SliderColor = ColorRGBA(0.8f, 0.8f, 0.8f, 1.0f);
+		m_RailBgColor = ColorRGBA(1.0f, 1.0f, 1.0f, 0.18f);
+		m_SliderColor = ColorRGBA(0.85f, 0.85f, 0.85f, 0.9f);
 		m_SliderColorHover = ColorRGBA(1.0f, 1.0f, 1.0f, 1.0f);
 		m_SliderColorGrabbed = ColorRGBA(0.9f, 0.9f, 0.9f, 1.0f);
 		m_ForceShowScrollbar = false;

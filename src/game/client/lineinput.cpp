@@ -7,6 +7,7 @@
 #include <base/dbg.h>
 #include <base/mem.h>
 #include <base/str.h>
+#include <base/log.h>
 #include <base/time.h>
 #include <engine/graphics.h>
 #include <engine/keys.h>
@@ -193,23 +194,32 @@ bool CLineInput::ProcessInput(const IInput::CEvent &Event)
 	// update derived attributes to handle external changes to the buffer
 	UpdateStrData();
 
-	static int64_t s_LastFallbackTime = 0;
+	// Commit pending fallback on key release if no TEXT event arrived
+	if(m_PendingFallbackKey != KEY_UNKNOWN)
+	{
+		if((Event.m_Flags & IInput::FLAG_RELEASE) && Event.m_Key == m_PendingFallbackKey)
+		{
+			char aBuf[2] = {m_PendingFallbackChar, 0};
+			SetRange(aBuf, m_SelectionStart, m_SelectionEnd);
+			m_PendingFallbackKey = KEY_UNKNOWN;
+		}
+		else if(Event.m_Flags & IInput::FLAG_TEXT)
+		{
+			m_PendingFallbackKey = KEY_UNKNOWN; // TEXT уже обработает
+		}
+	}
 
 	const size_t OldCursorPos = m_CursorPos;
 	const bool Selecting = Input()->ShiftIsPressed();
 	const size_t SelectionLength = GetSelectionLength();
 	bool KeyHandled = false;
-
 	if(Event.m_Flags & IInput::FLAG_TEXT)
 	{
-		// Suppress if we just inserted the same keystroke via the KEY_PRESS
-		// fallback (platforms that emit PRESS and TEXT as separate events
-		// would otherwise insert the character twice).
-		if(time_get() - s_LastFallbackTime > time_freq() / 50) // ~20ms
-			SetRange(Event.m_aText, m_SelectionStart, m_SelectionEnd);
+		m_PendingFallbackKey = KEY_UNKNOWN;
+		m_LastTextEventTime = time_get();
+		SetRange(Event.m_aText, m_SelectionStart, m_SelectionEnd);
 		KeyHandled = true;
 	}
-
 	if(Event.m_Flags & IInput::FLAG_PRESS)
 	{
 		const bool ModPressed = Input()->ModifierIsPressed();
@@ -408,12 +418,12 @@ bool CLineInput::ProcessInput(const IInput::CEvent &Event)
 			m_SelectionEnd = m_CursorPos = m_Len;
 			KeyHandled = true;
 		}
-		else if(!ModPressed && !AltPressed && !(Event.m_Flags & IInput::FLAG_TEXT))
+		else if(!ModPressed && !AltPressed &&
+			!(Event.m_Flags & IInput::FLAG_TEXT) &&
+			!(Event.m_Flags & IInput::FLAG_REPEAT) &&
+			(time_get() - m_LastTextEventTime > time_freq() / 40)) // ~25 мс
 		{
-			// Fallback for platforms / IMEs that don't reliably generate FLAG_TEXT.
-			// When a printable key was pressed but no text event was attached,
-			// insert the corresponding ASCII character ourselves, so typing works
-			// without spamming keys.
+			// Fallback only if no recent TEXT event (prevents latin+cyrillic duplication)
 			char Ch = 0;
 			const bool Shift = Input()->ShiftIsPressed();
 			if(Event.m_Key >= KEY_A && Event.m_Key <= KEY_Z)
@@ -443,9 +453,9 @@ bool CLineInput::ProcessInput(const IInput::CEvent &Event)
 
 			if(Ch != 0)
 			{
-				s_LastFallbackTime = time_get();
-				char aBuf[2] = {Ch, 0};
-				SetRange(aBuf, m_SelectionStart, m_SelectionEnd);
+				// Не вставляем сразу — ждём, придёт ли TEXT
+				m_PendingFallbackKey = Event.m_Key;
+				m_PendingFallbackChar = Ch;
 				KeyHandled = true;
 			}
 		}
@@ -697,6 +707,8 @@ void CLineInput::Deactivate() const
 	ms_pActiveInput->OnDeactivate();
 	ms_pActiveInput = nullptr;
 	ms_ActiveInputPriority = EInputPriority::NONE;
+	// Не вызываем StopTextInput здесь — из-за thrashing IME ломается.
+	// Текстовый ввод будет жить, пока клиент не закроет чат/консоль полностью.
 }
 
 void CLineInput::OnActivate()
@@ -706,7 +718,6 @@ void CLineInput::OnActivate()
 
 void CLineInput::OnDeactivate()
 {
-	Input()->StopTextInput();
 	m_MouseSelection.m_Selecting = false;
 }
 

@@ -10,7 +10,7 @@
 #include <base/str.h>
 #include <base/time.h>
 #include <base/vmath.h>
-
+#include <base/os.h>
 #include <engine/client.h>
 #include <engine/client/updater.h>
 #include <engine/config.h>
@@ -59,7 +59,7 @@ ColorRGBA CMenus::ms_ColorTabbarActiveIngame;
 ColorRGBA CMenus::ms_ColorTabbarHoverIngame;
 
 float CMenus::ms_ButtonHeight = 25.0f;
-float CMenus::ms_ListheaderHeight = 17.0f;
+float CMenus::ms_ListheaderHeight = 22.0f;
 
 CMenus::CMenus()
 {
@@ -125,16 +125,18 @@ int CMenus::DoButton_Toggle(const void *pId, int Checked, const CUIRect *pRect, 
 
 	return Active ? Ui()->DoButtonLogic(pId, Checked, pRect, Flags) : 0;
 }
-void CMenus::DrawMenuButtonOutline(const CUIRect *pRect, float Rounding)
+void CMenus::DrawMenuButtonOutline(const CUIRect *pRect, float Rounding, int Corners)
 {
 	if(!g_Config.m_ClButtonOutline)
 		return;
-	const float Width = (float)g_Config.m_ClButtonOutlineWidth;
-	if(Width <= 0.0f)
-		return;
 
+	// Толщина не больше ~15% меньшей стороны, чтобы на маленьких кнопках кольцо не схлопывалось
+	const float MinSide = std::min(pRect->w, pRect->h);
+	const float Width = std::min((float)g_Config.m_ClButtonOutlineWidth, std::max(1.0f, MinSide * 0.15f));
+
+	const bool Hard = g_Config.m_ClButtonOutlineMode == 0;
 	float Shift = 0.0f;
-	if(g_Config.m_ClButtonOutlineMode == 1)
+	if(g_Config.m_ClButtonOutlineAnimate)
 	{
 		const float AnimTime = (float)time() / (float)time_freq();
 		const float Speed = (float)g_Config.m_ClButtonOutlineSpeed / 100.0f;
@@ -144,29 +146,31 @@ void CMenus::DrawMenuButtonOutline(const CUIRect *pRect, float Rounding)
 	const ColorRGBA Color1 = color_cast<ColorRGBA>(ColorHSLA(g_Config.m_ClButtonOutlineColor1));
 	const ColorRGBA Color2 = color_cast<ColorRGBA>(ColorHSLA(g_Config.m_ClButtonOutlineColor2));
 
-	// Clamp radius to half the smaller dimension so straight segments never
-	// get negative lengths.
-	const float R = std::min({Rounding, pRect->w * 0.5f, pRect->h * 0.5f});
+	// Радиус каждого угла: скругляем только те, что скруглены у самой кнопки
+	const float MaxR = std::min(Rounding, MinSide * 0.5f);
+	const float RTL = (Corners & IGraphics::CORNER_TL) ? MaxR : 0.0f;
+	const float RTR = (Corners & IGraphics::CORNER_TR) ? MaxR : 0.0f;
+	const float RBR = (Corners & IGraphics::CORNER_BR) ? MaxR : 0.0f;
+	const float RBL = (Corners & IGraphics::CORNER_BL) ? MaxR : 0.0f;
+
 	const float W = pRect->w;
 	const float H = pRect->h;
 	const float x0 = pRect->x;
 	const float y0 = pRect->y;
 
-	const float LineW = W - 2.0f * R;   // horizontal straight length
-	const float LineH = H - 2.0f * R;   // vertical straight length
-	const float ArcLen = (pi * 0.5f) * R;
-	const float Perim = 2.0f * LineW + 2.0f * LineH + 4.0f * ArcLen;
+	const float LenTop = W - RTL - RTR;
+	const float LenRight = H - RTR - RBR;
+	const float LenBottom = W - RBR - RBL;
+	const float LenLeft = H - RBL - RTL;
+	const float Perim = LenTop + LenRight + LenBottom + LenLeft + (pi * 0.5f) * (RTL + RTR + RBR + RBL);
 	if(Perim <= 0.0f)
 		return;
 
-	// Color along the perimeter. `Triangle` gives C1 at t=0, C2 at t=0.5,
-	// C1 at t=1 — the ring closes without a visible color seam, and the
-	// `Shift` slides the whole gradient around the perimeter.
 	auto MixColorAt = [&](float T) -> ColorRGBA {
 		float P = fmodf(T + Shift, 1.0f);
 		if(P < 0.0f)
 			P += 1.0f;
-		const float Tri = P < 0.5f ? (P * 2.0f) : (2.0f - P * 2.0f);
+		const float Tri = Hard ? (P < 0.5f ? 0.0f : 1.0f) : (P < 0.5f ? (P * 2.0f) : (2.0f - P * 2.0f));
 		const float Q = 1.0f - Tri;
 		return ColorRGBA(
 			Color1.r * Q + Color2.r * Tri,
@@ -175,93 +179,63 @@ void CMenus::DrawMenuButtonOutline(const CUIRect *pRect, float Rounding)
 			Color1.a * Q + Color2.a * Tri);
 	};
 
-	auto EmitSeg = [&](const vec2 &P0, const vec2 &P1, const vec2 &N0, const vec2 &N1, float tA, float tB) {
-		const vec2 P0o = P0 + N0 * Width;
-		const vec2 P1o = P1 + N1 * Width;
-		const ColorRGBA cA = MixColorAt(tA);
-		const ColorRGBA cB = MixColorAt(tB);
+	// N - внешняя нормаль, обводка уходит внутрь кнопки
+	auto EmitSeg = [&](const vec2 &P0, const vec2 &P1, const vec2 &N0, const vec2 &N1, float tA, float tB, float Inset) {
+		const vec2 P0o = P0 - N0 * Inset;
+		const vec2 P1o = P1 - N1 * Inset;
+		// В режиме Constant цвет один на весь сегмент, поэтому границы полос резкие
+		const ColorRGBA cA = Hard ? MixColorAt((tA + tB) * 0.5f) : MixColorAt(tA);
+		const ColorRGBA cB = Hard ? cA : MixColorAt(tB);
 		Graphics()->SetColor4(cA, cA, cB, cB);
 		IGraphics::CFreeformItem F(P0.x, P0.y, P0o.x, P0o.y, P1.x, P1.y, P1o.x, P1o.y);
 		Graphics()->QuadsDrawFreeform(&F, 1);
 	};
 
-	auto AddLine = [&](const vec2 &Start, const vec2 &End, const vec2 &Normal, float TStart, float TEnd, int Segs) {
-		for(int i = 0; i < Segs; i++)
+	// Для резких полос нужно больше сегментов, чтобы граница цвета была точной
+	const int NumSegs = Hard ? 24 : 6;
+	float T = 0.0f;
+
+	auto DoLine = [&](const vec2 &Start, const vec2 &End, const vec2 &Normal, float Len) {
+		const float T0 = T;
+		T += Len / Perim;
+		if(Len <= 0.0f)
+			return;
+		for(int i = 0; i < NumSegs; i++)
 		{
-			const float sA = (float)i / Segs;
-			const float sB = (float)(i + 1) / Segs;
-			const vec2 P0 = Start + (End - Start) * sA;
-			const vec2 P1 = Start + (End - Start) * sB;
-			const float tA = TStart + (TEnd - TStart) * sA;
-			const float tB = TStart + (TEnd - TStart) * sB;
-			EmitSeg(P0, P1, Normal, Normal, tA, tB);
+			const float sA = (float)i / NumSegs;
+			const float sB = (float)(i + 1) / NumSegs;
+			EmitSeg(Start + (End - Start) * sA, Start + (End - Start) * sB, Normal, Normal, T0 + (T - T0) * sA, T0 + (T - T0) * sB, Width);
 		}
 	};
 
-	auto AddArc = [&](const vec2 &Center, float StartAngle, float EndAngle, float Radius, float TStart, float TEnd, int Segs) {
-		for(int i = 0; i < Segs; i++)
+	auto DoArc = [&](const vec2 &Center, float StartAngle, float EndAngle, float Radius) {
+		const float T0 = T;
+		T += (pi * 0.5f * Radius) / Perim;
+		if(Radius <= 0.0f)
+			return;
+		for(int i = 0; i < NumSegs; i++)
 		{
-			const float sA = (float)i / Segs;
-			const float sB = (float)(i + 1) / Segs;
+			const float sA = (float)i / NumSegs;
+			const float sB = (float)(i + 1) / NumSegs;
 			const float aA = StartAngle + (EndAngle - StartAngle) * sA;
 			const float aB = StartAngle + (EndAngle - StartAngle) * sB;
 			const vec2 D0(cosf(aA), sinf(aA));
 			const vec2 D1(cosf(aB), sinf(aB));
-			const vec2 P0 = Center + D0 * Radius;
-			const vec2 P1 = Center + D1 * Radius;
-			const float tA = TStart + (TEnd - TStart) * sA;
-			const float tB = TStart + (TEnd - TStart) * sB;
-			EmitSeg(P0, P1, D0, D1, tA, tB);
+			EmitSeg(Center + D0 * Radius, Center + D1 * Radius, D0, D1, T0 + (T - T0) * sA, T0 + (T - T0) * sB, std::min(Width, Radius));
 		}
 	};
 
 	Graphics()->TextureClear();
 	Graphics()->QuadsBegin();
 
-	const int NumLineSegs = 6;
-	const int NumArcSegs = 6;
-
-	// Cumulative parameter at each piece boundary (clockwise from top edge)
-	const float TTop1 = LineW / Perim;
-	const float TTR1 = TTop1 + ArcLen / Perim;
-	const float TRight1 = TTR1 + LineH / Perim;
-	const float TBR1 = TRight1 + ArcLen / Perim;
-	const float TBottom1 = TBR1 + LineW / Perim;
-	const float TBL1 = TBottom1 + ArcLen / Perim;
-	const float TLeft1 = TBL1 + LineH / Perim;
-	const float TTL1 = TLeft1 + ArcLen / Perim;
-
-	// Top edge (left → right)
-	if(LineW > 0.0f)
-		AddLine(vec2(x0 + R, y0), vec2(x0 + W - R, y0), vec2(0.0f, -1.0f), 0.0f, TTop1, NumLineSegs);
-
-	// Top-right arc (-π/2 → 0)
-	if(R > 0.0f)
-		AddArc(vec2(x0 + W - R, y0 + R), -pi * 0.5f, 0.0f, R, TTop1, TTR1, NumArcSegs);
-
-	// Right edge (top → bottom)
-	if(LineH > 0.0f)
-		AddLine(vec2(x0 + W, y0 + R), vec2(x0 + W, y0 + H - R), vec2(1.0f, 0.0f), TTR1, TRight1, NumLineSegs);
-
-	// Bottom-right arc (0 → π/2)
-	if(R > 0.0f)
-		AddArc(vec2(x0 + W - R, y0 + H - R), 0.0f, pi * 0.5f, R, TRight1, TBR1, NumArcSegs);
-
-	// Bottom edge (right → left)
-	if(LineW > 0.0f)
-		AddLine(vec2(x0 + W - R, y0 + H), vec2(x0 + R, y0 + H), vec2(0.0f, 1.0f), TBR1, TBottom1, NumLineSegs);
-
-	// Bottom-left arc (π/2 → π)
-	if(R > 0.0f)
-		AddArc(vec2(x0 + R, y0 + H - R), pi * 0.5f, pi, R, TBottom1, TBL1, NumArcSegs);
-
-	// Left edge (bottom → top)
-	if(LineH > 0.0f)
-		AddLine(vec2(x0, y0 + H - R), vec2(x0, y0 + R), vec2(-1.0f, 0.0f), TBL1, TLeft1, NumLineSegs);
-
-	// Top-left arc (π → 3π/2)
-	if(R > 0.0f)
-		AddArc(vec2(x0 + R, y0 + R), pi, pi * 1.5f, R, TLeft1, TTL1, NumArcSegs);
+	DoLine(vec2(x0 + RTL, y0), vec2(x0 + W - RTR, y0), vec2(0.0f, -1.0f), LenTop);
+	DoArc(vec2(x0 + W - RTR, y0 + RTR), -pi * 0.5f, 0.0f, RTR);
+	DoLine(vec2(x0 + W, y0 + RTR), vec2(x0 + W, y0 + H - RBR), vec2(1.0f, 0.0f), LenRight);
+	DoArc(vec2(x0 + W - RBR, y0 + H - RBR), 0.0f, pi * 0.5f, RBR);
+	DoLine(vec2(x0 + W - RBR, y0 + H), vec2(x0 + RBL, y0 + H), vec2(0.0f, 1.0f), LenBottom);
+	DoArc(vec2(x0 + RBL, y0 + H - RBL), pi * 0.5f, pi, RBL);
+	DoLine(vec2(x0, y0 + H - RBL), vec2(x0, y0 + RTL), vec2(-1.0f, 0.0f), LenLeft);
+	DoArc(vec2(x0 + RTL, y0 + RTL), pi, pi * 1.5f, RTL);
 
 	Graphics()->QuadsEnd();
 	Graphics()->SetColor(1.0f, 1.0f, 1.0f, 1.0f);
@@ -289,7 +263,7 @@ int CMenus::DoButton_Menu(CButtonContainer *pButtonContainer, const char *pText,
 
 		pAnimator->m_Time = Time;
 
-		const float V = pAnimator->m_Value * pAnimator->m_Value * (3.0f - 2.0f * pAnimator->m_Value);
+		const float V = 1.0f - std::pow(1.0f - pAnimator->m_Value, 3.0f);
 		const float DeltaW = V * pAnimator->m_WOffset;
 		const float DeltaH = V * pAnimator->m_HOffset;
 		Rect.x -= DeltaW * 0.5f;
@@ -310,8 +284,10 @@ int CMenus::DoButton_Menu(CButtonContainer *pButtonContainer, const char *pText,
 	if(Checked)
 		Color = ColorRGBA(0.6f, 0.6f, 0.6f, 0.5f);
 	Color.a *= Ui()->ButtonColorMul(pButtonContainer);
-	DrawMenuButtonOutline(&Rect, Rounding);
 	Rect.Draw(Color, Corners, Rounding);
+	if(pText[0] != '\0' || pImageName != nullptr)
+		if(!m_NoButtonOutline)
+			DrawMenuButtonOutline(&Rect, Rounding, Corners);
 
 	if(pImageName)
 	{
@@ -349,7 +325,7 @@ int CMenus::DoButton_MenuTab(CButtonContainer *pButtonContainer, const char *pTe
 	{
 		auto Time = time_get_nanoseconds();
 
-		if(pAnimator->m_Time + 100ms < Time)
+		if(pAnimator->m_Time + 400ms < Time)
 		{
 			pAnimator->m_Value = pAnimator->m_Active ? 1 : 0;
 			pAnimator->m_Time = Time;
@@ -439,7 +415,7 @@ int CMenus::DoButton_GridHeader(const void *pId, const char *pText, int Checked,
 
 	CUIRect Temp;
 	pRect->VMargin(5.0f, &Temp);
-	Ui()->DoLabel(&Temp, pText, pRect->h * CUi::ms_FontmodHeight, Align);
+	Ui()->DoLabel(&Temp, pText, std::min(pRect->h, 18.0f) * CUi::ms_FontmodHeight, Align);
 	return Ui()->DoButtonLogic(pId, Checked, pRect, BUTTONFLAG_LEFT);
 }
 
@@ -1554,8 +1530,10 @@ void CMenus::Render()
 		{
 			ServerBrowser()->FavoriteCommunitiesFilter().Clear();
 			ServerBrowser()->FavoriteCommunitiesFilter().Add(IServerBrowser::COMMUNITY_DDNET);
-			SetMenuPage(PAGE_FAVORITE_COMMUNITY_1);
-			SetShowStart(false);
+			// Страницу не переключаем: иначе пропускается заставка Hydra.
+			// Кнопка «Играть» откроет вкладку DDNet через ui_page.
+			g_Config.m_UiPage = PAGE_FAVORITE_COMMUNITY_1;
+			m_MenuPage = PAGE_FAVORITE_COMMUNITY_1;
 			ServerBrowser()->Refresh(IServerBrowser::TYPE_FAVORITE_COMMUNITY_1);
 		}
 	}
@@ -2884,12 +2862,17 @@ void CMenus::RenderPopupFullscreen(CUIRect Screen)
 			ScrollParams.m_ScrollUnit = 3.0f * (ItemHeight + ItemSpacing);
 			s_ScrollRegion.Begin(&List, &ScrollParams);
 
+			// Запас под внешнюю обводку кнопок, иначе клиппинг её обрезает
+			const float OutlinePad = g_Config.m_ClButtonOutline ? (float)g_Config.m_ClButtonOutlineWidth + 1.0f : 0.0f;
+			List.VMargin(OutlinePad, &List);
+			List.HSplitTop(OutlinePad, nullptr, &List);
+
 			const int NumShown = std::min(NumItems, (int)std::size(s_aItemButtons));
 			for(int i = 0; i < NumShown; i++)
 			{
 				CUIRect Item;
 				List.HSplitTop(ItemHeight, &Item, &List);
-				List.HSplitTop(ItemSpacing, nullptr, &List);
+				List.HSplitTop(ItemSpacing + OutlinePad, nullptr, &List);
 
 				// Не рисуем и не обрабатываем клики для элементов вне видимой области
 				if(!s_ScrollRegion.AddRect(Item))
@@ -2902,7 +2885,7 @@ void CMenus::RenderPopupFullscreen(CUIRect Screen)
 				if(DoButton_Menu(&s_aItemButtons[i], aLabel, i == m_NotificationSelected, &Item, BUTTONFLAG_LEFT, nullptr, IGraphics::CORNER_ALL, 5.0f, 0.0f, ItemColor))
 				{
 					m_NotificationSelected = i;
-					Events.MarkRead(Notification.m_Id);
+					Events.MarkRead(Notification.m_Key);
 				}
 			}
 
@@ -2917,6 +2900,22 @@ void CMenus::RenderPopupFullscreen(CUIRect Screen)
 				else if(Selected.m_Type == CEventNotification::TYPE_EVENT)
 					pType = Localize("Event");
 
+				bool TitleOnly = true;
+				for(const char *pChar = Selected.m_aText; *pChar; pChar++)
+				{
+					if(*pChar != ' ' && *pChar != '\t' && *pChar != '\n' && *pChar != '\r')
+					{
+						TitleOnly = false;
+						break;
+					}
+				}
+
+				if(TitleOnly)
+				{
+					Ui()->DoLabel(&Details, Selected.m_aTitle, 24.0f, TEXTALIGN_MC, {.m_MaxWidth = Details.w});
+				}
+				else
+				{
 				CUIRect TypeRow, TitleRow;
 				Details.HSplitTop(20.0f, &TypeRow, &Details);
 				Ui()->DoLabel(&TypeRow, pType, 14.0f, TEXTALIGN_ML);
@@ -2935,7 +2934,23 @@ void CMenus::RenderPopupFullscreen(CUIRect Screen)
 				s_DetailsScroll.AddRect(TextRect);
 				Ui()->DoLabel(&TextRect, Selected.m_aText, 16.0f, TEXTALIGN_TL, {.m_MaxWidth = TextRect.w});
 
+				if(Selected.m_aLink[0] != '\0')
+				{
+					Details.HSplitTop(12.0f, nullptr, &Details);
+					CUIRect LinkButton;
+					Details.HSplitTop(28.0f, &LinkButton, &Details);
+					s_DetailsScroll.AddRect(LinkButton);
+					LinkButton.VMargin(20.0f, &LinkButton);
+
+					static CButtonContainer s_OpenLinkButton;
+					if(DoButton_Menu(&s_OpenLinkButton, Localize("Open link"), 0, &LinkButton))
+					{
+						Client()->ViewLink(Selected.m_aLink);
+					}
+				}
+
 				s_DetailsScroll.End();
+				}
 			}
 			else
 			{

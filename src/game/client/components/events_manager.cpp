@@ -1,5 +1,6 @@
 #include "events_manager.h"
 
+#include <base/log.h>
 #include <base/str.h>
 #include <base/time.h>
 #include <engine/graphics.h>
@@ -8,12 +9,24 @@
 #include <game/client/gameclient.h>
 
 #include <engine/font_icons.h>
+#include <engine/sound.h>
+#include <game/client/components/sounds.h>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <functional>
 #include <memory>
+
+static bool IsBlankText(const char *pText)
+{
+	for(; *pText; pText++)
+	{
+		if(*pText != ' ' && *pText != '\t' && *pText != '\n' && *pText != '\r')
+			return false;
+	}
+	return true;
+}
 
 static void UrlEncodeSimple(const char *pSrc, char *pDst, size_t DstSize)
 {
@@ -34,8 +47,25 @@ static void UrlEncodeSimple(const char *pSrc, char *pDst, size_t DstSize)
 	pDst[j] = '\0';
 }
 
+static int NotificationKey(int Id, const char *pTitle, const char *pText)
+{
+	char aBuf[1024];
+	str_format(aBuf, sizeof(aBuf), "%d|%s|%s", Id, pTitle, pText);
+
+	// FNV-1a
+	unsigned int Hash = 2166136261u;
+	for(const char *p = aBuf; *p; p++)
+	{
+		Hash ^= (unsigned char)*p;
+		Hash *= 16777619u;
+	}
+	// Ключи всегда >= 1000000, чтобы старые записи (обычные id 1, 2, 3...) отличались от них
+	return 1000000 + (int)(Hash % 2000000000u);
+}
+
 void CEventsManager::OnInit()
 {
+	m_NotifySound = Sound()->LoadOpus("audio/notification.opus");
 	LoadReadState();
 	FetchGitHubConfig();
 	FetchFirebaseData();
@@ -99,6 +129,7 @@ void CEventsManager::OnRender()
 	else if(m_pEventsTask && (m_pEventsTask->State() == EHttpState::ERROR || m_pEventsTask->State() == EHttpState::ABORTED))
 	{
 		// Иначе FetchFirebaseData() больше никогда не запустится
+		log_error("events", "Firebase request failed");
 		m_pEventsTask = nullptr;
 	}
 
@@ -109,51 +140,80 @@ void CEventsManager::OnRender()
 void CEventsManager::ParseFirebaseResponse(json_value *pRoot)
 {
 	if(pRoot->type != json_object)
+	{
+		log_error("events", "Firebase response is not a JSON object");
 		return;
+	}
 
+	// Firebase отдаёт массив, а если ключи не подряд с 0, то объект
 	const json_value &Notifs = (*pRoot)["notifications"];
+	std::vector<const json_value *> vItems;
 	if(Notifs.type == json_array)
 	{
-		m_vNotifications.clear();
 		for(unsigned int i = 0; i < Notifs.u.array.length; i++)
-		{
-			const json_value &Item = Notifs[i];
-			if(Item.type != json_object)
-				continue;
-
-			const json_value &IdVal = Item["id"];
-			const json_value &TitleVal = Item["title"];
-			const json_value &TextVal = Item["text"];
-			const json_value &TypeVal = Item["type"];
-
-			if(IdVal.type != json_integer || TitleVal.type != json_string || TextVal.type != json_string)
-				continue;
-
-			CEventNotification Entry;
-			Entry.m_Id = (int)IdVal.u.integer;
-			str_copy(Entry.m_aTitle, TitleVal.u.string.ptr);
-			str_copy(Entry.m_aText, TextVal.u.string.ptr);
-
-			Entry.m_Type = CEventNotification::TYPE_NEWS;
-			if(TypeVal.type == json_string)
-			{
-				if(str_comp(TypeVal.u.string.ptr, "update") == 0)
-					Entry.m_Type = CEventNotification::TYPE_UPDATE;
-				else if(str_comp(TypeVal.u.string.ptr, "event") == 0)
-					Entry.m_Type = CEventNotification::TYPE_EVENT;
-			}
-			Entry.m_Read = IsIdRead(Entry.m_Id);
-
-			m_vNotifications.push_back(Entry);
-
-			if(!Entry.m_Read && std::find(m_vToastedIds.begin(), m_vToastedIds.end(), Entry.m_Id) == m_vToastedIds.end())
-			{
-				MarkToasted(Entry.m_Id);
-				ShowToast(Entry);
-			}
-		}
-		m_NotificationsLoaded = true;
+			vItems.push_back(Notifs.u.array.values[i]);
 	}
+	else if(Notifs.type == json_object)
+	{
+		for(unsigned int i = 0; i < Notifs.u.object.length; i++)
+			vItems.push_back(Notifs.u.object.values[i].value);
+	}
+	else
+	{
+		log_error("events", "'notifications' not found in Firebase response");
+		return;
+	}
+
+	m_vNotifications.clear();
+	for(const json_value *pItem : vItems)
+	{
+		const json_value &Item = *pItem;
+		if(Item.type != json_object)
+			continue;
+
+		const json_value &IdVal = Item["id"];
+		const json_value &TitleVal = Item["title"];
+		const json_value &TextVal = Item["text"];
+		const json_value &TypeVal = Item["type"];
+
+		if(IdVal.type != json_integer || TitleVal.type != json_string || TextVal.type != json_string)
+		{
+			log_error("events", "skipped notification with invalid fields (id must be a number)");
+			continue;
+		}
+
+		CEventNotification Entry;
+		Entry.m_Id = (int)IdVal.u.integer;
+		str_copy(Entry.m_aTitle, TitleVal.u.string.ptr);
+		str_copy(Entry.m_aText, TextVal.u.string.ptr);
+
+		const json_value &LinkVal = Item["link"];
+		if(LinkVal.type == json_string)
+			str_copy(Entry.m_aLink, LinkVal.u.string.ptr);
+		else
+			Entry.m_aLink[0] = '\0';
+
+		Entry.m_Type = CEventNotification::TYPE_NEWS;
+		if(TypeVal.type == json_string)
+		{
+			if(str_comp(TypeVal.u.string.ptr, "update") == 0)
+				Entry.m_Type = CEventNotification::TYPE_UPDATE;
+			else if(str_comp(TypeVal.u.string.ptr, "event") == 0)
+				Entry.m_Type = CEventNotification::TYPE_EVENT;
+		}
+		Entry.m_Key = NotificationKey(Entry.m_Id, Entry.m_aTitle, Entry.m_aText);
+		Entry.m_Read = IsIdRead(Entry.m_Key);
+
+		m_vNotifications.push_back(Entry);
+
+		if(!Entry.m_Read && std::find(m_vToastedIds.begin(), m_vToastedIds.end(), Entry.m_Key) == m_vToastedIds.end())
+		{
+			MarkToasted(Entry.m_Key);
+			ShowToast(Entry);
+		}
+	}
+	m_NotificationsLoaded = true;
+	log_info("events", "loaded %d notifications, %d unread", (int)m_vNotifications.size(), UnreadCount());
 }
 
 void CEventsManager::ShowToast(const CEventNotification &Notification)
@@ -162,7 +222,7 @@ void CEventsManager::ShowToast(const CEventNotification &Notification)
 	Toast.m_Id = Notification.m_Id;
 	Toast.m_Type = Notification.m_Type;
 	str_copy(Toast.m_aTitle, Notification.m_aTitle);
-	str_truncate(Toast.m_aText, sizeof(Toast.m_aText), Notification.m_aText, 70);
+	str_copy(Toast.m_aText, Notification.m_aText);
 	m_vToasts.push_back(Toast);
 }
 
@@ -173,23 +233,26 @@ bool CEventsManager::IsIdRead(int Id) const
 
 void CEventsManager::LoadReadState()
 {
+	// Значения меньше 1000000 остались от старой схемы (по id) и игнорируются
+	constexpr int MIN_KEY = 1000000;
+
 	m_vReadIds.clear();
 	const char *pStr = g_Config.m_ClReadNotifications;
 	char aToken[16];
 	while((pStr = str_next_token(pStr, ",", aToken, sizeof(aToken))))
 	{
-		const int Id = str_toint(aToken);
-		if(Id > 0)
-			m_vReadIds.push_back(Id);
+		const int Key = str_toint(aToken);
+		if(Key >= MIN_KEY)
+			m_vReadIds.push_back(Key);
 	}
 
 	m_vToastedIds.clear();
 	const char *pToasted = g_Config.m_ClToastedNotifications;
 	while((pToasted = str_next_token(pToasted, ",", aToken, sizeof(aToken))))
 	{
-		const int Id = str_toint(aToken);
-		if(Id > 0)
-			m_vToastedIds.push_back(Id);
+		const int Key = str_toint(aToken);
+		if(Key >= MIN_KEY)
+			m_vToastedIds.push_back(Key);
 	}
 }
 
@@ -227,16 +290,16 @@ int CEventsManager::UnreadCount() const
 	return Count;
 }
 
-void CEventsManager::MarkRead(int Id)
+void CEventsManager::MarkRead(int Key)
 {
 	for(CEventNotification &Notification : m_vNotifications)
 	{
-		if(Notification.m_Id == Id)
+		if(Notification.m_Key == Key)
 			Notification.m_Read = true;
 	}
-	if(!IsIdRead(Id))
+	if(!IsIdRead(Key))
 	{
-		m_vReadIds.push_back(Id);
+		m_vReadIds.push_back(Key);
 		SaveReadState();
 	}
 }
@@ -247,9 +310,9 @@ void CEventsManager::MarkAllRead()
 	for(CEventNotification &Notification : m_vNotifications)
 	{
 		Notification.m_Read = true;
-		if(!IsIdRead(Notification.m_Id))
+		if(!IsIdRead(Notification.m_Key))
 		{
-			m_vReadIds.push_back(Notification.m_Id);
+			m_vReadIds.push_back(Notification.m_Key);
 			Changed = true;
 		}
 	}
@@ -294,9 +357,9 @@ void CEventsManager::RenderToast()
 		return;
 
 	constexpr float FadeIn = 0.35f;
-	constexpr float Hold = 6.0f;
+	const float Hold = (float)g_Config.m_ClNotificationDuration;
 	constexpr float FadeOut = 0.4f;
-	constexpr float Total = FadeIn + Hold + FadeOut;
+	const float Total = FadeIn + Hold + FadeOut;
 
 	// Убираем отработавшие карточки
 	for(size_t i = 0; i < m_vToasts.size();)
@@ -316,6 +379,8 @@ void CEventsManager::RenderToast()
 		{
 			m_vToasts[i].m_Started = true;
 			m_vToasts[i].m_StartTime = Now;
+			if(g_Config.m_SndEnable && m_NotifySound >= 0)
+				Sound()->Play(CSounds::CHN_GUI, m_NotifySound, 0, 1.0f);
 		}
 	}
 
@@ -324,7 +389,7 @@ void CEventsManager::RenderToast()
 	Graphics()->MapScreen(CScreenRect(0.0f, 0.0f, ScreenWidth, ScreenHeight));
 
 	const float BoxW = 175.0f;
-	const float BoxH = 42.0f;
+	const float BoxH = 80.0f;
 	const float Spacing = 6.0f;
 	const float X = ScreenWidth - BoxW - 10.0f;
 
@@ -391,10 +456,20 @@ void CEventsManager::RenderToast()
 		const float TextX = X + 26.0f;
 		const float TextW = BoxW - 26.0f - 8.0f;
 		TextRender()->TextColor(ColorRGBA(Accent.r, Accent.g, Accent.b, Alpha));
-		TextRender()->Text(TextX, Y + 5.0f, 7.5f, Toast.m_aTitle, TextW);
+		if(IsBlankText(Toast.m_aText))
+		{
+			// Только заголовок: по центру карточки
+			const float TitleSize = 9.0f;
+			const float TitleWidth = std::min(TextRender()->TextWidth(TitleSize, Toast.m_aTitle, -1, -1.0f), TextW);
+			TextRender()->Text(TextX + (TextW - TitleWidth) / 2.0f, Y + BoxH / 2.0f - 5.5f, TitleSize, Toast.m_aTitle, TextW);
+		}
+		else
+		{
+			TextRender()->Text(TextX, Y + 5.0f, 7.5f, Toast.m_aTitle, TextW);
 
-		TextRender()->TextColor(ColorRGBA(1.0f, 1.0f, 1.0f, 0.95f * Alpha));
-		TextRender()->Text(TextX, Y + 16.0f, 6.0f, Toast.m_aText, TextW);
+			TextRender()->TextColor(ColorRGBA(1.0f, 1.0f, 1.0f, 0.95f * Alpha));
+			TextRender()->Text(TextX, Y + 25.0f, 6.0f, Toast.m_aText, TextW);
+		}
 	}
 
 	TextRender()->TextColor(TextRender()->DefaultTextColor());
@@ -420,6 +495,30 @@ void CEventsManager::SendScore(const char *pPlayerName, int NewScore)
 void CEventsManager::OnConsoleInit()
 {
 	Console()->Register("event_test_score", "i[score]", CFGFLAG_CLIENT, ConTestScore, this, "Send a test score to Firebase");
+	Console()->Register("event_reset", "", CFGFLAG_CLIENT, ConResetNotifications, this, "Reset read/shown state of all notifications and show them again");
+}
+
+void CEventsManager::ConResetNotifications(IConsole::IResult *pResult, void *pUserData)
+{
+	((CEventsManager *)pUserData)->ResetNotifications();
+}
+
+void CEventsManager::ResetNotifications()
+{
+	m_vReadIds.clear();
+	m_vToastedIds.clear();
+	m_vToasts.clear();
+	g_Config.m_ClReadNotifications[0] = '\0';
+	g_Config.m_ClToastedNotifications[0] = '\0';
+
+	// Показать карточки заново для всех загруженных уведомлений
+	for(CEventNotification &Notification : m_vNotifications)
+	{
+		Notification.m_Read = false;
+		MarkToasted(Notification.m_Key);
+		ShowToast(Notification);
+	}
+	log_info("events", "notification state reset (%d notifications)", (int)m_vNotifications.size());
 }
 
 void CEventsManager::ConTestScore(IConsole::IResult *pResult, void *pUserData)

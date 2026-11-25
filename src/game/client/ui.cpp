@@ -208,6 +208,15 @@ void CUi::Update()
 
 		// Update mouse position and buttons based on touch finger state
 		UpdateTouchState(m_TouchState);
+		if(m_TouchState.m_PrimaryPressed)
+		{
+   			UpdatedMouseButtonsNext |= 1;
+		}
+
+		if(m_TouchState.m_SecondaryPressed)
+		{
+    		UpdatedMouseButtonsNext |= 2;
+		}
 		if(m_TouchState.m_AnyPressed)
 		{
 			if(!CheckMouseLock())
@@ -218,10 +227,11 @@ void CUi::Update()
 			}
 			m_UpdatedMouseDelta += m_TouchState.m_PrimaryDelta * WindowSize;
 
-			// Scroll currently hovered scroll region with touch scroll gesture.
+			// Scroll currently hovered scroll region with touch scroll gesture,
+			// but don't interfere with an active UI element or scrollbar.
 			if(m_TouchState.m_ScrollAmount != vec2(0.0f, 0.0f))
 			{
-				if(m_pHotScrollRegion != nullptr)
+				if(m_pHotScrollRegion != nullptr && m_pActiveItem == nullptr)
 				{
 					m_pHotScrollRegion->ScrollRelativeDirect(-m_TouchState.m_ScrollAmount * pScreen->Size());
 					m_pLastScrollRegionForMomentum = m_pHotScrollRegion;
@@ -260,7 +270,7 @@ void CUi::Update()
 		}
 		else if(LeftPressed && LeftWasPressed)
 		{
-			const bool ScrollbarActive = m_pLastActiveScrollbar != nullptr && CheckActiveItem(m_pLastActiveScrollbar);
+			const bool ScrollbarActive = ActiveItem() != nullptr;
 			if(!m_MouseDragScrollMoved && !ScrollbarActive && m_pHotScrollRegion != nullptr &&
 				length(m_MousePos - m_MouseDragScrollStart) > (float)g_Config.m_ClScrollDragThreshold)
 			{
@@ -438,8 +448,10 @@ void CUi::UpdateTouchState(CTouchState &State) const
 		}
 	}
 
+
 	// Handle one finger being moved as a scrolling gesture.
-	if(vTouchFingerStates.size() == 1)
+	// Do not scroll while dragging an active UI element or scrollbar.
+	if(vTouchFingerStates.size() == 1 && m_pActiveItem == nullptr && m_pLastActiveScrollbar == nullptr)
 	{
 		const vec2 Delta = vTouchFingerStates[0].m_Delta;
 		const float DirectionThreshold = 3.0f;
@@ -453,6 +465,7 @@ void CUi::UpdateTouchState(CTouchState &State) const
 	{
 		State.m_ScrollAmount = vec2(0.0f, 0.0f);
 	}
+
 	// Track finger velocity for inertia on release.
 	if(vTouchFingerStates.size() == 1)
 	{
@@ -1542,8 +1555,15 @@ float CUi::DoScrollbarV(const void *pId, const CUIRect *pRect, float Current)
 
 	// render
 	Rail.Draw(ColorRGBA(1.0f, 1.0f, 1.0f, 0.25f), IGraphics::CORNER_ALL, Rail.w / 2.0f);
-	Handle.Draw(ms_ScrollBarColorFunction.GetColor(CheckActiveItem(pId), HotItem() == pId), IGraphics::CORNER_ALL, Handle.w / 2.0f);
+	CUIRect HandleDraw = Handle;
+	HandleDraw.x -= 2.0f;
+	HandleDraw.w += 4.0f;
 
+	HandleDraw.Draw(
+		ms_ScrollBarColorFunction.GetColor(CheckActiveItem(pId), HotItem() == pId),
+		IGraphics::CORNER_ALL,
+		HandleDraw.w / 2.0f
+	);
 	return ReturnValue;
 }
 
@@ -1653,7 +1673,15 @@ float CUi::DoScrollbarH(const void *pId, const CUIRect *pRect, float Current, co
 	else
 	{
 		Rail.Draw(ColorRGBA(1.0f, 1.0f, 1.0f, 0.25f), IGraphics::CORNER_ALL, Rail.h / 2.0f);
-		Handle.Draw(HandleColor, IGraphics::CORNER_ALL, Rail.h / 2.0f);
+		CUIRect HandleDraw = Handle;
+		HandleDraw.y -= 6.0f;
+		HandleDraw.h += 12.0f;
+
+		HandleDraw.Draw(
+			HandleColor,
+			IGraphics::CORNER_ALL,
+			HandleDraw.h / 2.0f
+		);
 	}
 
 	return ReturnValue;

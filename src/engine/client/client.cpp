@@ -3013,6 +3013,10 @@ static const TVersion gs_InvalidVersion = std::make_tuple(-1, -1, -1);
 static TVersion ToVersion(char *pStr)
 {
 	int aVersion[3] = {0, 0, 0};
+
+	if(pStr[0] == 'v')
+		pStr++;
+
 	const char *p = strtok(pStr, ".");
 
 	for(int i = 0; i < 3 && p; ++i)
@@ -3029,6 +3033,53 @@ static TVersion ToVersion(char *pStr)
 
 	return std::make_tuple(aVersion[0], aVersion[1], aVersion[2]);
 }
+void CClient::RequestHydraRelease()
+{
+	if(m_pHydraReleaseTask)
+		return;
+
+	m_pHydraReleaseTask = HttpGet("https://api.github.com/repos/mrazigde-cloud/HydraClientForDDnet/releases/latest");
+	m_pHydraReleaseTask->Timeout(CTimeout{10000, 0, 500, 10});
+	Http()->Run(m_pHydraReleaseTask);
+}
+
+void CClient::UpdateHydraRelease()
+{
+	if(!m_pHydraReleaseTask)
+		return;
+
+	if(m_pHydraReleaseTask->State() == EHttpState::DONE)
+	{
+		json_value *pJson = m_pHydraReleaseTask->ResultJson();
+
+		if(pJson && pJson->type == json_object)
+		{
+			const json_value &Tag = (*pJson)["tag_name"];
+
+			if(Tag.type == json_string)
+			{
+				char aLatestVersion[64];
+				char aCurrentVersion[64];
+
+				str_copy(aLatestVersion, Tag);
+				str_copy(aCurrentVersion, HYDRA_RELEASE_VERSION);
+
+				if(ToVersion(aLatestVersion) > ToVersion(aCurrentVersion))
+					str_copy(m_aVersionStr, Tag);
+				else
+					str_copy(m_aVersionStr, "0");
+			}
+		}
+
+		json_value_free(pJson);
+		m_pHydraReleaseTask = nullptr;
+	}
+	else if(m_pHydraReleaseTask->State() == EHttpState::ERROR ||
+		m_pHydraReleaseTask->State() == EHttpState::ABORTED)
+	{
+		m_pHydraReleaseTask = nullptr;
+	}
+}
 
 void CClient::LoadDDNetInfo()
 {
@@ -3041,23 +3092,6 @@ void CClient::LoadDDNetInfo()
 	}
 
 	const json_value &DDNetInfo = *pDDNetInfo;
-	const json_value &CurrentVersion = DDNetInfo["version"];
-	if(CurrentVersion.type == json_string)
-	{
-		char aNewVersionStr[64];
-		str_copy(aNewVersionStr, CurrentVersion);
-		char aCurVersionStr[64];
-		str_copy(aCurVersionStr, GAME_RELEASE_VERSION);
-		if(ToVersion(aNewVersionStr) > ToVersion(aCurVersionStr))
-		{
-			str_copy(m_aVersionStr, CurrentVersion);
-		}
-		else
-		{
-			m_aVersionStr[0] = '0';
-			m_aVersionStr[1] = '\0';
-		}
-	}
 
 	const json_value &News = DDNetInfo["news"];
 	if(News.type == json_string)
@@ -3329,6 +3363,7 @@ void CClient::UpdateDemoIntraTimers()
 void CClient::Update()
 {
 	PumpNetwork();
+	UpdateHydraRelease();
 
 	// update editor/gameclient, before input snapping
 	if(m_EditorActive)
@@ -3805,7 +3840,7 @@ void CClient::Run()
 		ShowMessageBox({.m_pTitle = "HTTP Error", .m_pMessage = pErrorMessage});
 		return;
 	}
-
+	RequestHydraRelease();
 	// init graphics
 	m_pGraphics = CreateEngineGraphicsThreaded();
 	Kernel()->RegisterInterface(m_pGraphics); // IEngineGraphics

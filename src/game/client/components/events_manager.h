@@ -4,6 +4,7 @@
 
 #include <engine/console.h>
 #include <engine/http.h>
+#include <engine/sound.h>
 #include <engine/shared/json.h>
 #include <game/client/component.h>
 
@@ -21,10 +22,12 @@ struct CEventNotification
 	};
 
 	int m_Id = 0;
+	int m_Key = 0; // id + хеш содержимого, по нему определяется прочитано/показано
 	int m_Type = TYPE_NEWS;
 	bool m_Read = false;
 	char m_aTitle[256] = {0};
 	char m_aText[512] = {0};
+	char m_aLink[512] = {0};
 };
 
 class CEventsManager : public CComponent
@@ -50,6 +53,7 @@ class CEventsManager : public CComponent
 	std::vector<SToast> m_vToasts;
 	std::vector<int> m_vToastedIds;
 	int64_t m_LastRenderTime = 0;
+	int m_NotifySound = -1;
 
 	std::vector<int> m_vReadIds;
 	bool m_NotificationsLoaded = false;
@@ -64,6 +68,8 @@ class CEventsManager : public CComponent
 	void SaveReadState();
 	bool IsIdRead(int Id) const;
 	static void ConTestScore(IConsole::IResult *pResult, void *pUserData);
+	static void ConResetNotifications(IConsole::IResult *pResult, void *pUserData);
+	void ResetNotifications();
 	
 	public:
 	std::vector<CEventNotification> m_vNotifications;

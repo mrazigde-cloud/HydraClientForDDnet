@@ -74,7 +74,8 @@ private:
 	void DoForceSkinPicker(CUIRect View);
 	int DoButton_GridHeader(const void *pId, const char *pText, int Checked, const CUIRect *pRect, int Align = TEXTALIGN_ML);
 	int DoButton_Favorite(const void *pButtonId, const void *pParentId, bool Checked, const CUIRect *pRect);
-	void DrawMenuButtonOutline(const CUIRect *pRect, float Rounding);
+	void DrawMenuButtonOutline(const CUIRect *pRect, float Rounding, int Corners = IGraphics::CORNER_ALL);
+	bool m_NoButtonOutline = false;
 	std::optional<std::chrono::nanoseconds> m_SkinList7LastRefreshTime;
 	std::optional<std::chrono::nanoseconds> m_SkinPartsList7LastRefreshTime;
 
@@ -296,7 +297,6 @@ protected:
 
 	// for password popup
 	CLineInput m_PasswordInput;
-
 	// for call vote
 	int m_CallvoteSelectedOption;
 	int m_CallvoteSelectedPlayer;
@@ -618,10 +618,6 @@ protected:
 	// TODO: Change PopupConfirm to avoid using a function pointer to a CMenus
 	//       member function, to move this function to CMenusSettingsControls
 	void ResetSettingsControls();
-
-	// found in menus_settings_credits.cpp
-	void RenderSettingsCredits(CUIRect MainView);
-
 	// found in menus_settings_ddnet.cpp
 	void RenderSettingsDDNet(CUIRect MainView);
 	void RenderSettingsTestClient(CUIRect MainView);
@@ -649,6 +645,7 @@ protected:
 	void ProfileFromCurrent(SProfile &Profile);
 	void ProfileApply(const SProfile &Profile);
 	void RenderSettingsAnimations(CUIRect MainView);
+	void RenderSettingsButtons(CUIRect MainView);
 	void RenderSettingsTabContent(int Page, CUIRect View);
 	void SetMenuBackgroundForPage(int Page);
 	static float EaseTabSlide(float t, int Mode);
@@ -805,7 +802,6 @@ public:
 		SETTINGS_TESTCLIENT,
 		SETTINGS_PROFILES,
 		SETTINGS_ANIMATIONS,
-		SETTINGS_CREDITS,
 		SETTINGS_LENGTH,
 	};
 

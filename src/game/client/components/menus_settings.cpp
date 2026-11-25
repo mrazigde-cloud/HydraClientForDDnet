@@ -89,7 +89,6 @@ void CMenus::SetMenuBackgroundForPage(int Page)
 	case SETTINGS_TESTCLIENT: Pos = CMenuBackground::POS_SETTINGS_ASSETS; break;
 	case SETTINGS_PROFILES: Pos = CMenuBackground::POS_SETTINGS_TEE; break;
 	case SETTINGS_ANIMATIONS: Pos = CMenuBackground::POS_SETTINGS_ASSETS; break;
-	case SETTINGS_CREDITS: Pos = CMenuBackground::POS_SETTINGS_CREDITS; break;
 	}
 	GameClient()->m_MenuBackground.ChangePosition(Pos);
 }
@@ -109,11 +108,12 @@ void CMenus::RenderSettingsTabContent(int Page, CUIRect View)
 	else if(Page == SETTINGS_TESTCLIENT) RenderSettingsTestClient(View);
 	else if(Page == SETTINGS_PROFILES)   RenderSettingsProfiles(View);
 	else if(Page == SETTINGS_ANIMATIONS) RenderSettingsAnimations(View);
-	else if(Page == SETTINGS_CREDITS)    RenderSettingsCredits(View);
 }
 
 void CMenus::RenderSettings(CUIRect MainView)
 {
+	if(g_Config.m_UiSettingsPage >= SETTINGS_LENGTH)
+		g_Config.m_UiSettingsPage = SETTINGS_GENERAL;
 	CUIRect Button, TabBar, RestartBar;
 	MainView.VSplitRight(120.0f, &MainView, &TabBar);
 	MainView.Draw(ms_ColorTabbarActive, IGraphics::CORNER_B, 10.0f);
@@ -140,10 +140,9 @@ void CMenus::RenderSettings(CUIRect MainView)
 		Localize("Sound"),
 		Localize("DDNet"),
 		Localize("Assets"),
-		"Hydra Client",
+		Localize("Hydra Client"),
 		Localize("Profiles"),
-		Localize("Animations"),
-		Localize("Credits")};
+		Localize("Animations")};
 	static CButtonContainer s_aTabButtons[SETTINGS_LENGTH];
 
 	for(int i = 0; i < SETTINGS_LENGTH; i++)
@@ -618,7 +617,7 @@ void CMenus::ResetTestClientSettings()
 	g_Config.m_ClTestClientEmoteCustom7 = 0;
 	g_Config.m_ClTestClientEmoteCustom8 = 0;
 	// ---- Scroll ----
-	g_Config.m_ClTouchScrollSmooth = 2;
+	g_Config.m_ClTouchScrollSmooth = 0;
 	g_Config.m_ClScrollInertiaStrength = 100;
 	g_Config.m_ClScrollInertiaDecay = 100;
 	g_Config.m_ClScrollInertiaSpeed = 100;
@@ -627,6 +626,8 @@ void CMenus::ResetTestClientSettings()
 	g_Config.m_ClWheelScrollAmount = 60;
 	// ---- Extra ----
 	g_Config.m_ClExtraAutoSwitch = 1;
+	// ---- Notifications ----
+	g_Config.m_ClNotificationDuration = 6;
 	// ---- Tee rotation ----
 	g_Config.m_ClTeeRotation = 0;
 	g_Config.m_ClTeeRotationMode = 0;
@@ -2070,6 +2071,12 @@ void CMenus::RenderSettingsTestClient(CUIRect MainView)
 			Localize("Randomize interval"), 5, 120, &CUi::ms_LinearScrollbarScale, 0u, " s");
 	}
 	// =====================================
+		// Notification duration (Hydra)
+	MainView.HSplitTop(20.0f, &Button, &MainView);
+	s_ScrollRegion.AddRect(Button);
+	Ui()->DoScrollbarOption(&g_Config.m_ClNotificationDuration, &g_Config.m_ClNotificationDuration, &Button,
+		Localize("Notification duration"), 1, 60, &CUi::ms_LinearScrollbarScale, 0u, " s");
+	Ui()->DoToolTip(&g_Config.m_ClNotificationDuration, &Button, Localize("How long popup notifications stay on screen (seconds)"));
 	// Scroll inertia strength
 	MainView.HSplitTop(20.0f, &Button, &MainView);
 	s_ScrollRegion.AddRect(Button);
@@ -2391,6 +2398,25 @@ void CMenus::RenderSettingsTestClient(CUIRect MainView)
 
 void CMenus::RenderSettingsAnimations(CUIRect MainView)
 {
+	static int s_SubTab = 0;
+	{
+		CUIRect TabBar, TabTransitions, TabButtons;
+		MainView.HSplitTop(22.0f, &TabBar, &MainView);
+		MainView.HSplitTop(10.0f, nullptr, &MainView);
+		TabBar.VSplitMid(&TabTransitions, &TabButtons);
+
+		static CButtonContainer s_TabTransitionsButton, s_TabButtonsButton;
+		if(DoButton_MenuTab(&s_TabTransitionsButton, Localize("Transitions"), s_SubTab == 0, &TabTransitions, IGraphics::CORNER_L, nullptr, nullptr, nullptr, nullptr, 4.0f))
+			s_SubTab = 0;
+		if(DoButton_MenuTab(&s_TabButtonsButton, Localize("Buttons"), s_SubTab == 1, &TabButtons, IGraphics::CORNER_R, nullptr, nullptr, nullptr, nullptr, 4.0f))
+			s_SubTab = 1;
+	}
+	if(s_SubTab == 1)
+	{
+		RenderSettingsButtons(MainView);
+		return;
+	}
+
 	static CScrollRegion s_ScrollRegion;
 	CScrollRegionParams ScrollParams;
 	ScrollParams.m_ScrollUnit = 60.0f;
@@ -2508,55 +2534,111 @@ void CMenus::RenderSettingsAnimations(CUIRect MainView)
 		static CButtonContainer s_aPageEasing[4];
 		RenderEasing(&g_Config.m_ClSettingsTabAnimationEasing, s_aPageEasing);
 	}
+	// Регистрируем высоту всего контента для скролла
+	CUIRect UsedRect = MainView;
+	UsedRect.y = StartY;
+	UsedRect.h = Left.y - StartY + 10.0f;
+	s_ScrollRegion.AddRect(UsedRect);
+	s_ScrollRegion.End();
+}
+void CMenus::RenderSettingsButtons(CUIRect MainView)
+{
+	static CScrollRegion s_ScrollRegion;
+	CScrollRegionParams ScrollParams;
+	ScrollParams.m_ScrollUnit = 60.0f;
+	s_ScrollRegion.Begin(&MainView, &ScrollParams);
+	const float StartY = MainView.y;
 
-	// ---------- Button outline panel ----------
+	CUIRect Left;
+	MainView.VSplitLeft(std::min(MainView.w, 520.0f), &Left, nullptr);
+
+	// Заголовок
 	{
-		Left.HSplitTop(20.0f, nullptr, &Left);
-		CUIRect Panel, Content;
-		Left.HSplitTop(250.0f, &Panel, &Left);
-		Panel.Draw(ColorRGBA(1.0f, 1.0f, 1.0f, 0.25f), IGraphics::CORNER_ALL, 10.0f);
-		Panel.Margin(10.0f, &Content);
-
 		CUIRect Title;
-		Content.HSplitTop(24.0f, &Title, &Content);
-		Content.HSplitTop(6.0f, nullptr, &Content);
-		Ui()->DoLabel(&Title, Localize("Buttons"), 20.0f, TEXTALIGN_ML);
-
-		CUIRect EnableRect;
-		Content.HSplitTop(20.0f, &EnableRect, &Content);
-		if(DoButton_CheckBox(&g_Config.m_ClButtonOutline, Localize("Button outline"), g_Config.m_ClButtonOutline, &EnableRect))
-			g_Config.m_ClButtonOutline ^= 1;
-
-		static std::vector<CButtonContainer> s_aWidthButtons = {{}, {}, {}, {}};
-		static std::vector<const char *> s_apWidthLabels = {Localize("Thin"), Localize("Normal"), Localize("Thick"), Localize("Extra thick")};
-		static std::vector<int> s_aWidthValues = {2, 4, 8, 12};
-		int CurWidth = g_Config.m_ClButtonOutlineWidth;
-		DoLine_RadioMenu(Content, Localize("Outline width"), s_aWidthButtons, s_apWidthLabels, s_aWidthValues, CurWidth);
-		g_Config.m_ClButtonOutlineWidth = CurWidth;
-
-		static CButtonContainer s_Color1Reset;
-		static CButtonContainer s_Color2Reset;
-		DoLine_ColorPicker(&s_Color1Reset, 25.0f, 13.0f, 5.0f, &Content, Localize("Color 1"),
-			(unsigned int *)&g_Config.m_ClButtonOutlineColor1, ColorRGBA(0.0f, 1.0f, 0.0f, 1.0f), true, nullptr, false);
-		DoLine_ColorPicker(&s_Color2Reset, 25.0f, 13.0f, 5.0f, &Content, Localize("Color 2"),
-			(unsigned int *)&g_Config.m_ClButtonOutlineColor2, ColorRGBA(0.0f, 1.0f, 1.0f, 1.0f), true, nullptr, false);
-
-		static std::vector<CButtonContainer> s_aModeButtons = {{}, {}};
-		static std::vector<const char *> s_apModeLabels = {Localize("Constant"), Localize("Linear")};
-		static std::vector<int> s_aModeValues = {0, 1};
-		int CurMode = g_Config.m_ClButtonOutlineMode;
-		DoLine_RadioMenu(Content, Localize("Mode"), s_aModeButtons, s_apModeLabels, s_aModeValues, CurMode);
-		g_Config.m_ClButtonOutlineMode = CurMode;
-
-		if(g_Config.m_ClButtonOutlineMode == 1)
-		{
-			CUIRect SpeedRect;
-			Content.HSplitTop(25.0f, &SpeedRect, &Content);
-			Ui()->DoScrollbarOption(&g_Config.m_ClButtonOutlineSpeed, &g_Config.m_ClButtonOutlineSpeed, &SpeedRect, Localize("Shimmer speed"), 1, 300, &CUi::ms_LinearScrollbarScale, 0u, "%");
-		}
+		Left.HSplitTop(30.0f, &Title, &Left);
+		Left.HSplitTop(5.0f, nullptr, &Left);
+		Ui()->DoLabel(&Title, Localize("Button outline"), 20.0f, TEXTALIGN_ML);
 	}
 
-	// Регистрируем высоту всего контента для скролла
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_ClButtonOutline, Localize("Enable outline"), &g_Config.m_ClButtonOutline, &Left, 20.0f);
+	Left.HSplitTop(10.0f, nullptr, &Left);
+
+	// Строка: подпись слева, элементы справа (высота элементов 24, строка 30)
+	auto DoRow = [&](const char *pText, CUIRect &Controls) {
+		CUIRect Row, Label;
+		Left.HSplitTop(30.0f, &Row, &Left);
+		Left.HSplitTop(8.0f, nullptr, &Left);
+		Row.VSplitLeft(Row.w * 0.38f, &Label, &Controls);
+		Controls.HMargin(3.0f, &Controls);
+		Ui()->DoLabel(&Label, pText, 14.0f, TEXTALIGN_ML);
+	};
+
+	// Ряд отдельных кнопок с одинаковыми зазорами
+	auto DoSegments = [&](CButtonContainer *pButtons, const char *const *ppLabels, const int *pValues, int Num, int *pValue, CUIRect Controls) {
+		const float Gap = 6.0f;
+		const float ButtonWidth = (Controls.w - Gap * (Num - 1)) / Num;
+		for(int i = 0; i < Num; i++)
+		{
+			CUIRect Button;
+			Controls.VSplitLeft(ButtonWidth, &Button, &Controls);
+			Controls.VSplitLeft(Gap, nullptr, &Controls);
+			if(DoButton_Menu(&pButtons[i], ppLabels[i], *pValue == pValues[i], &Button, BUTTONFLAG_LEFT, nullptr, IGraphics::CORNER_ALL, 5.0f, 0.15f))
+				*pValue = pValues[i];
+		}
+	};
+
+	// Толщина
+	{
+		CUIRect Controls;
+		DoRow(Localize("Outline width"), Controls);
+		static CButtonContainer s_aWidthButtons[4];
+		const char *apLabels[] = {Localize("Thin"), Localize("Normal"), Localize("Thick"), Localize("Extra thick")};
+		const int aValues[] = {2, 4, 8, 12};
+		DoSegments(s_aWidthButtons, apLabels, aValues, 4, &g_Config.m_ClButtonOutlineWidth, Controls);
+	}
+
+	// Цвета
+	static CButtonContainer s_Color1Reset, s_Color2Reset;
+	DoLine_ColorPicker(&s_Color1Reset, 30.0f, 14.0f, 8.0f, &Left, Localize("Color 1"),
+		(unsigned int *)&g_Config.m_ClButtonOutlineColor1, ColorRGBA(0.0f, 1.0f, 0.0f, 1.0f), false, nullptr, false);
+	DoLine_ColorPicker(&s_Color2Reset, 30.0f, 14.0f, 8.0f, &Left, Localize("Color 2"),
+		(unsigned int *)&g_Config.m_ClButtonOutlineColor2, ColorRGBA(0.0f, 1.0f, 1.0f, 1.0f), false, nullptr, false);
+
+	// Режим
+	{
+		CUIRect Controls;
+		DoRow(Localize("Mode"), Controls);
+		static CButtonContainer s_aModeButtons[2];
+		const char *apLabels[] = {Localize("Constant"), Localize("Linear")};
+		const int aValues[] = {0, 1};
+		DoSegments(s_aModeButtons, apLabels, aValues, 2, &g_Config.m_ClButtonOutlineMode, Controls);
+	}
+
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_ClButtonOutlineAnimate, Localize("Animate outline"), &g_Config.m_ClButtonOutlineAnimate, &Left, 20.0f);
+	Left.HSplitTop(8.0f, nullptr, &Left);
+
+	// Скорость мерцания
+	if(g_Config.m_ClButtonOutlineAnimate)
+	{
+		CUIRect Row;
+		Left.HSplitTop(20.0f, &Row, &Left);
+		Left.HSplitTop(10.0f, nullptr, &Left);
+		Ui()->DoScrollbarOption(&g_Config.m_ClButtonOutlineSpeed, &g_Config.m_ClButtonOutlineSpeed, &Row, Localize("Shimmer speed"), 1, 300, &CUi::ms_LinearScrollbarScale, 0u, "%");
+	}
+
+	// Предпросмотр
+	{
+		Left.HSplitTop(10.0f, nullptr, &Left);
+		CUIRect Label, Preview;
+		Left.HSplitTop(22.0f, &Label, &Left);
+		Ui()->DoLabel(&Label, Localize("Preview"), 14.0f, TEXTALIGN_ML);
+		Left.HSplitTop(40.0f, &Preview, &Left);
+		Left.HSplitTop(10.0f, nullptr, &Left);
+		Preview.VSplitLeft(std::min(Preview.w, 220.0f), &Preview, nullptr);
+		static CButtonContainer s_PreviewButton;
+		DoButton_Menu(&s_PreviewButton, Localize("Button"), 0, &Preview, BUTTONFLAG_LEFT, nullptr, IGraphics::CORNER_ALL, 10.0f, 0.5f, ColorRGBA(0.0f, 0.0f, 0.0f, 0.25f));
+	}
+
 	CUIRect UsedRect = MainView;
 	UsedRect.y = StartY;
 	UsedRect.h = Left.y - StartY + 10.0f;
@@ -2830,11 +2912,11 @@ void CMenus::RenderSettingsProfiles(CUIRect MainView)
 			for(int i = 0; i < (int)m_vProfiles.size(); i++)
 			{
 				CUIRect Item;
-				ListCol.HSplitTop(28.0f, &Item, &ListCol);
-				ListCol.HSplitTop(4.0f, nullptr, &ListCol);
+				ListCol.HSplitTop(30.0f, &Item, &ListCol);
+				ListCol.HSplitTop(10.0f, nullptr, &ListCol);
 				if(!s_ProfileListScroll.AddRect(Item))
 					continue;
-				if(DoButton_Menu(&s_aItemButtons[i], m_vProfiles[i].m_aName, i == m_ProfileSelected, &Item))
+				if(DoButton_Menu(&s_aItemButtons[i], m_vProfiles[i].m_aName, i == m_ProfileSelected, &Item, BUTTONFLAG_LEFT, nullptr, IGraphics::CORNER_ALL, 5.0f, 0.3f))
 					m_ProfileSelected = i;
 			}
 			s_ProfileListScroll.End();
@@ -2924,21 +3006,20 @@ void CMenus::RenderSettingsProfiles(CUIRect MainView)
 
 		// Кнопки
 		{
-			CUIRect Buttons, ApplyBtn, CurrentBtn, DeleteBtn, Tmp;
-			EditCol.HSplitTop(26.0f, &Buttons, &EditCol);
-			EditCol.HSplitTop(6.0f, nullptr, &EditCol);
-			Buttons.VSplitLeft(Buttons.w / 3.0f, &ApplyBtn, &Tmp);
-			Tmp.VSplitLeft(Tmp.w / 2.0f, &CurrentBtn, &DeleteBtn);
-			ApplyBtn.VMargin(2.0f, &ApplyBtn);
-			CurrentBtn.VMargin(2.0f, &CurrentBtn);
-			DeleteBtn.VMargin(2.0f, &DeleteBtn);
+			CUIRect Row1, Row2, ApplyBtn, CurrentBtn, DeleteBtn;
+			EditCol.HSplitTop(30.0f, &Row1, &EditCol);
+			EditCol.HSplitTop(10.0f, nullptr, &EditCol);
+			EditCol.HSplitTop(30.0f, &Row2, &EditCol);
+			EditCol.HSplitTop(10.0f, nullptr, &EditCol);
+			Row1.VSplitMid(&ApplyBtn, &CurrentBtn, 10.0f);
+			DeleteBtn = Row2;
 
 			static CButtonContainer s_ApplyButton, s_CurrentButton, s_DeleteButton;
-			if(DoButton_Menu(&s_ApplyButton, Localize("Apply"), 0, &ApplyBtn, BUTTONFLAG_LEFT, nullptr, IGraphics::CORNER_ALL, 5.0f, 0.0f, ColorRGBA(0.0f, 1.0f, 0.0f, 0.25f)))
+			if(DoButton_Menu(&s_ApplyButton, Localize("Apply"), 0, &ApplyBtn, BUTTONFLAG_LEFT, nullptr, IGraphics::CORNER_ALL, 5.0f, 0.3f, ColorRGBA(0.0f, 1.0f, 0.0f, 0.25f)))
 				DoApply = true;
-			if(DoButton_Menu(&s_CurrentButton, Localize("From current"), 0, &CurrentBtn))
+			if(DoButton_Menu(&s_CurrentButton, Localize("From current"), 0, &CurrentBtn, BUTTONFLAG_LEFT, nullptr, IGraphics::CORNER_ALL, 5.0f, 0.3f))
 				DoFromCurrent = true;
-			if(DoButton_Menu(&s_DeleteButton, Localize("Delete"), 0, &DeleteBtn, BUTTONFLAG_LEFT, nullptr, IGraphics::CORNER_ALL, 5.0f, 0.0f, ColorRGBA(1.0f, 0.0f, 0.0f, 0.25f)))
+			if(DoButton_Menu(&s_DeleteButton, Localize("Delete"), 0, &DeleteBtn, BUTTONFLAG_LEFT, nullptr, IGraphics::CORNER_ALL, 5.0f, 0.3f, ColorRGBA(1.0f, 0.0f, 0.0f, 0.25f)))
 				DoDelete = true;
 
 			if(s_AppliedTime != 0 && time_get() - s_AppliedTime < time_freq() * 2)
